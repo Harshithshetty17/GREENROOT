@@ -78,7 +78,7 @@ st.set_page_config(
     page_title="GREENROOT — Precision Agriculture DSS",
     page_icon="🌱",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 # --------------------------------------------------------------------------- #
@@ -145,6 +145,12 @@ _CSS = """
   .gr-sub { font-size: 13px; color: #5c6f63; line-height: 1.45; }
   .gr-driver { font-size: 19px; font-weight: 650; color: #14281d;
                line-height: 1.3; margin-top: 2px; }
+  .gr-readout { font-size: 14px; color: #14281d; line-height: 1.5;
+                background: #f4f8f5; border: 1px solid #e0e9e3;
+                border-radius: 10px; padding: 10px 14px; }
+  .gr-readout b { color: #14603c; }
+  .gr-readout-hint { font-size: 12.5px; color: #5c6f63;
+                     margin: 5px 0 10px 2px; }
 
   /* ---- Advisory items -------------------------------------------------- */
   .gr-advisory {
@@ -170,6 +176,53 @@ _CSS = """
   }
   /* Tables: readable rather than dense. */
   div[data-testid="stDataFrame"] { border-radius: 10px; }
+
+  /* ---- Phone ----------------------------------------------------------- */
+  /* This is used one-handed, outdoors, on a mid-range Android. Columns must
+     stack rather than squeeze, and every control must be thumb-sized. */
+  @media (max-width: 820px) {
+    /* The collapsed sidebar is 320px wide translated -300px, so its right
+       20px sits over the content area. Inset the content past that rail or
+       the first character of every line is painted over. */
+    .block-container { padding: 1rem 1rem 2.5rem 1.9rem; }
+
+    /* Streamlit columns shrink rather than wrap by default; force a stack. */
+    div[data-testid="stHorizontalBlock"] { flex-direction: column; gap: .85rem; }
+    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+      width: 100% !important; flex: 1 1 100% !important; min-width: 0 !important;
+    }
+
+    .gr-hero { padding: 16px 18px; border-radius: 12px; }
+    .gr-hero h1 { font-size: 21px; }
+    .gr-hero p  { font-size: 13px; }
+
+    .gr-primary { padding: 18px 18px; }
+    .gr-primary .crop { font-size: 30px; }
+    .gr-metric { font-size: 34px; }
+    .gr-driver { font-size: 17px; }
+    .gr-advisory { font-size: 14.5px; padding: 12px 14px; }
+
+    /* Thumb-sized targets; 44px is the accepted minimum. */
+    .stButton button, .stDownloadButton button {
+      min-height: 46px; font-size: 15px; width: 100%;
+    }
+    div[data-testid="stNumberInput"] input,
+    div[data-testid="stTextInput"] input { min-height: 42px; font-size: 16px; }
+    /* 16px on inputs stops iOS Safari zooming the page on focus. */
+    div[data-testid="stSelectbox"] div[data-baseweb="select"] { min-height: 42px; }
+
+    /* Tabs scroll horizontally; keep them tappable. */
+    button[data-baseweb="tab"] { font-size: 13.5px; padding: 10px 2px; }
+
+    /* The sidebar is a drawer here, so let it use the screen it needs. */
+    section[data-testid="stSidebar"] { min-width: 82vw !important;
+                                       max-width: 90vw !important; }
+  }
+
+  @media (max-width: 420px) {
+    .gr-hero h1 { font-size: 19px; }
+    .gr-primary .crop { font-size: 26px; }
+  }
 </style>
 """
 st.markdown(_CSS, unsafe_allow_html=True)
@@ -399,11 +452,13 @@ def render_sidebar() -> Dict[str, object]:
         )
 
     st.sidebar.markdown("---")
-    run = st.sidebar.button(
-        tr("run", simple), type="primary", width="stretch"
+    st.sidebar.caption(
+        "Close this menu, then press the green button to see your crop."
+        if simple
+        else "Close the sidebar and run the recommendation from the action bar."
     )
 
-    return {"district": district, "city": city, "features": values, "run": run}
+    return {"district": district, "city": city, "features": values}
 
 
 # --------------------------------------------------------------------------- #
@@ -415,8 +470,9 @@ def render_recommendation_tab(state: Dict[str, object]) -> None:
     prediction = state.get("prediction")
     if prediction is None:
         st.info(
-            "Fill in your soil test and weather on the left, then press "
-            "**" + tr("run", simple) + "**."
+            "Check your soil readings above, then press **"
+            + tr("run", simple)
+            + "**. To change them, tap ☰ at the top of the screen."
             if simple
             else "Configure soil chemistry and microclimate in the sidebar, "
             "then select **Generate recommendation**."
@@ -522,7 +578,7 @@ def render_recommendation_tab(state: Dict[str, object]) -> None:
         if simple
         else FEATURE_LABELS
     )
-    figure, axes = plt.subplots(figsize=(10, 3.4))
+    figure, axes = plt.subplots(figsize=(7.6, 3.6))
     # Diverging, not status: a high nitrogen reading is neither good nor bad,
     # it is simply above the reference mean.
     axes.barh(
@@ -684,7 +740,7 @@ def render_xai_tab(state: Dict[str, object]) -> None:
 
     st.markdown("")
     with st.container():
-        figure, axes = plt.subplots(1, 2, figsize=(13, 4.2), sharey=True)
+        figure, axes = plt.subplots(1, 2, figsize=(10.5, 4.0), sharey=True)
         plain_names = {
             name: _feature_word(name, simple) for name in FEATURE_NAMES
         }
@@ -716,7 +772,7 @@ def render_xai_tab(state: Dict[str, object]) -> None:
             axes[index].set_title(f"{title}\n{subtitle}", fontsize=10.5)
             axes[index].set_xlabel(
                 "How strongly it pushed  →" if simple else "Attribution",
-                fontsize=9.5,
+                fontsize=10.5,
             )
             _style_axes(axes[index])
         figure.suptitle(
@@ -807,7 +863,7 @@ def render_sensitivity_tab(state: Dict[str, object]) -> None:
     # at one end of the range still appear.
     ranked = np.argsort(probabilities.max(axis=0))[::-1][:n_curves]
 
-    figure, axes = plt.subplots(figsize=(11, 4.4))
+    figure, axes = plt.subplots(figsize=(8.8, 4.4))
     # Crop identity is categorical: fixed slot order, never a generated or
     # cycled hue, and never a value ramp (viridis would double-encode rank).
     palette = series_palette(len(ranked))
@@ -832,14 +888,14 @@ def render_sensitivity_tab(state: Dict[str, object]) -> None:
         zorder=1,
     )
     index = FEATURE_NAMES.index(feature)
-    axes.set_xlabel(f"{FEATURE_LABELS[index]} ({FEATURE_UNITS[index]})", fontsize=10)
+    axes.set_xlabel(f"{FEATURE_LABELS[index]} ({FEATURE_UNITS[index]})", fontsize=11)
     axes.set_ylabel(
         "Chance this crop suits" if simple else "Posterior probability", fontsize=10
     )
     axes.set_ylim(-0.02, 1.02)
     # A legend is always present for >= 2 series, so identity is never
     # carried by colour alone.
-    axes.legend(frameon=False, fontsize=9, ncol=min(len(ranked) + 1, 4))
+    axes.legend(frameon=False, fontsize=10, ncol=min(len(ranked) + 1, 4))
     _style_axes(axes, grid_axis="y")
     figure.tight_layout()
     st.pyplot(figure, width="stretch")
@@ -1032,7 +1088,7 @@ def _render_bulk_result(result: BatchResult) -> None:
                 color=ACCENT,
                 height=0.62,
             )
-            axes.set_xlabel("Samples recommended", fontsize=10)
+            axes.set_xlabel("Samples recommended", fontsize=11)
             axes.set_title("Recommended crop distribution across the survey", fontsize=11)
             _style_axes(axes)
             figure.tight_layout()
@@ -1138,7 +1194,7 @@ def render_audit_tab() -> None:
         counts = frame["recommended_crop"].value_counts()
         figure, axes = plt.subplots(figsize=(9, max(2.4, 0.34 * len(counts))))
         axes.barh(counts.index[::-1], counts.to_numpy()[::-1], color=ACCENT, height=0.6)
-        axes.set_xlabel("Recommendations logged", fontsize=10)
+        axes.set_xlabel("Recommendations logged", fontsize=11)
         _style_axes(axes)
         figure.tight_layout()
         st.pyplot(figure, width="stretch")
@@ -1272,9 +1328,33 @@ def main() -> None:
             </div>""",
         unsafe_allow_html=True,
     )
+
+    bar_left, bar_right = st.columns([2.2, 1], gap="medium")
+    with bar_left:
+        features = inputs["features"]
+        st.markdown(
+            f"<div class='gr-readout'>"
+            f"<b>{inputs['district']}</b> · "
+            f"N {features['N']:.0f} · P {features['P']:.0f} · "
+            f"K {features['K']:.0f} · pH {features['ph']:.1f} · "
+            f"{features['temperature']:.0f}°C · {features['rainfall']:.0f} mm"
+            f"</div>"
+            f"<div class='gr-readout-hint'>"
+            + (
+                "Tap ☰ at the top to change these."
+                if simple
+                else "Adjust inputs in the sidebar."
+            )
+            + "</div>",
+            unsafe_allow_html=True,
+        )
+    with bar_right:
+        main_run = st.button(
+            tr("run", simple), type="primary", width="stretch", key="run_main"
+        )
     ensure_database()
 
-    if inputs["run"]:
+    if main_run:
         features: Dict[str, float] = inputs["features"]  # type: ignore[assignment]
         vector = [features[name] for name in FEATURE_NAMES]
         try:

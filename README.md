@@ -564,6 +564,20 @@ python validate_architecture.py    # architecture audit → reports/  (~3 min)
 pytest -v                          # verification suite
 ```
 
+### On a phone
+
+```bat
+run_phone.bat          REM Windows
+```
+```bash
+./run_phone.sh         # macOS / Linux
+```
+
+Prints an address like `http://192.168.1.42:8501` — open it in the phone's
+browser with both devices on the same Wi-Fi. For a public link that works
+anywhere, see **[PHONE.md](PHONE.md)**, which also covers the firewall prompt,
+networks that block device-to-device traffic, and Streamlit Cloud deployment.
+
 ### Optional: live weather
 
 ```bash
@@ -600,6 +614,8 @@ GREENROOT/
 ├── train.py                    Original training script (see warning below)
 ├── audit_xai.py                Original XAI diagnostic script
 ├── run.bat                     One-click Windows launcher
+├── run_phone.bat / .sh         Serve to a phone on the same Wi-Fi
+├── PHONE.md                    Phone setup and deployment guide
 ├── requirements.txt
 │
 ├── data/                       Source corpora (read-only)
@@ -789,6 +805,14 @@ required before any field deployment.
 project does not bundle a Kannada typeface (a licensed Noto Sans Kannada TTF
 would need to be added to embed one). The HTML export carries the bilingual
 card and prints correctly from any browser.
+
+**Phone access trades a security check for reachability.** `run_phone.*`
+disables Streamlit's CORS and XSRF protections, which is *required* — without
+them the browser's WebSocket is refused from any non-localhost address and the
+phone shows a blank page. The app has no login, so anyone on the same network
+can open it while the server runs. Acceptable on home or college Wi-Fi for a
+demo; not on public Wi-Fi. The desktop launcher `run.bat` keeps both
+protections enabled.
 
 **Advisory status.** Output is decision *support*, not prescription. Every card
 and every export carries the instruction to corroborate with a certified

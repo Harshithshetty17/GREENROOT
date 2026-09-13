@@ -383,21 +383,34 @@ class TestThreadSafety:
         db_manager.close_connections()
 
     def test_each_thread_gets_its_own_connection(self, temp_db: Path) -> None:
-        seen: List[int] = []
+        """Each thread must receive a distinct connection object.
+
+        The connections are held in a list for the duration of the assertion.
+        Comparing ``id()`` of released objects would be unsound: CPython reuses
+        memory addresses, so a closed connection's address can be handed to the
+        next thread's connection and the test fails at random.
+        """
+        connections: List[sqlite3.Connection] = []
         lock = threading.Lock()
 
         def capture() -> None:
             with get_connection(temp_db) as conn:
                 with lock:
-                    seen.append(id(conn))
-            db_manager.close_connections()
+                    connections.append(conn)  # strong ref: no address reuse
 
         threads = [threading.Thread(target=capture) for _ in range(4)]
         for thread in threads:
             thread.start()
         for thread in threads:
             thread.join()
-        assert len(set(seen)) == len(seen), "Connections must not be shared"
+
+        assert len(connections) == 4
+        for index, conn in enumerate(connections):
+            for other in connections[index + 1:]:
+                assert conn is not other, "Connections must not be shared"
+
+        for conn in connections:
+            conn.close()
 
     def test_reads_interleave_with_writes(self, temp_db: Path) -> None:
         log_transaction(**_record(), db_path=temp_db)

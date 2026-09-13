@@ -128,8 +128,8 @@ def apply_matplotlib_theme() -> None:
             "axes.edgecolor": LINE,
             "axes.linewidth": 0.8,
             "axes.labelcolor": MUTED,
-            "axes.labelsize": 10,
-            "axes.titlesize": 11.5,
+            "axes.labelsize": 11.5,
+            "axes.titlesize": 12.5,
             "axes.titlecolor": INK,
             "axes.titlepad": 12,
             "axes.grid": True,
@@ -139,13 +139,13 @@ def apply_matplotlib_theme() -> None:
             "grid.linestyle": "-",       # never dashed: dashing reads as a threshold
             "xtick.color": MUTED,
             "ytick.color": MUTED,
-            "xtick.labelsize": 9,
-            "ytick.labelsize": 9,
+            "xtick.labelsize": 10.5,
+            "ytick.labelsize": 10.5,
             "xtick.major.size": 0,
             "ytick.major.size": 0,
             "legend.frameon": False,
-            "legend.fontsize": 9.5,
-            "font.size": 10,
+            "legend.fontsize": 10.5,
+            "font.size": 11,
             "lines.linewidth": 2.0,      # thin marks
             "lines.markersize": 8,       # >= 8px markers
             "figure.autolayout": False,
@@ -163,7 +163,7 @@ def style_axes(axes, *, grid_axis: str = "x") -> None:
     axes.grid(False)
     axes.grid(True, axis=grid_axis, color=GRID, linewidth=0.8)
     axes.set_axisbelow(True)
-    axes.tick_params(colors=MUTED, labelsize=9, length=0)
+    axes.tick_params(colors=MUTED, labelsize=10.5, length=0)
 
 
 __all__ = [

@@ -1,148 +1,845 @@
-import os
-import joblib
-import requests
+"""GREENROOT — Streamlit presentation layer.
+
+A thin, stateless view over the ``src`` package. Every computation — inference,
+explanation, advisory synthesis, persistence — lives in a domain module; this
+file only gathers input, dispatches, and renders.
+
+Run with::
+
+    streamlit run app.py
+"""
+
+from __future__ import annotations
+
+import base64
+import io
+import logging
+from datetime import date, datetime, timedelta
+from typing import Dict, List, Optional
+
+import matplotlib
+
+matplotlib.use("Agg")
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import streamlit as st
 
-st.set_page_config(page_title="AI Precision Crop Recommender", page_icon="🌱", layout="wide")
+from src.core.config import (
+    CONSENSUS_TOP_K,
+    DEFAULT_INPUTS,
+    FEATURE_BOUNDS,
+    FEATURE_LABELS,
+    FEATURE_NAMES,
+    FEATURE_UNITS,
+    JACCARD_FIDELITY_THRESHOLD,
+    OOD_ZSCORE_THRESHOLD,
+    REPORTED_CV_ACCURACY,
+)
+from src.database import db_manager
+from src.models.inference import CropRecommender, ValidationError
+from src.models.xai_engine import ExplainerConsensus
+from src.services.soil_service import get_district_baseline, list_districts
+from src.services.weather_service import get_weather
+from src.utils.agronomy_advisory import CRITICAL, INFO, WARNING, generate_advisory
+from src.utils.report_generator import (
+    build_card,
+    render_html,
+    render_markdown,
+    render_text,
+)
 
-# 1. Load Trained Model Artifacts
-@st.cache_resource
-def load_models():
-    model_path = os.path.join("models", "stacking_model.pkl")
-    scaler_path = os.path.join("models", "scaler.pkl")
-    classes_path = os.path.join("models", "class_names.pkl")
-    if not (os.path.exists(model_path) and os.path.exists(scaler_path) and os.path.exists(classes_path)):
-        return None, None, None
-    return joblib.load(model_path), joblib.load(scaler_path), joblib.load(classes_path)
+logging.basicConfig(level=logging.INFO)
 
-# 2. Regional District Fallback
-@st.cache_data
-def load_nfsm_districts():
-    nfsm_path = os.path.join("data", "Cleaned_NFSM_Dataset.csv")
-    if os.path.exists(nfsm_path):
-        try:
-            df_nfsm = pd.read_csv(nfsm_path)
-            for col in ['District', 'district', 'District Name', 'taluku']:
-                if col in df_nfsm.columns:
-                    return sorted(df_nfsm[col].dropna().unique().tolist()[:50])
-        except Exception:
-            pass
-    return ["Udupi", "Dakshina Kannada", "Bengaluru Rural", "Mysuru", "Dharwad"]
+st.set_page_config(
+    page_title="GREENROOT — Precision Agriculture DSS",
+    page_icon="🌱",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
-model, scaler, classes = load_models()
-district_list = load_nfsm_districts()
+# --------------------------------------------------------------------------- #
+# Presentation constants
+# --------------------------------------------------------------------------- #
+ACCENT = "#1f7a4d"
+ACCENT_SOFT = "#e7f2eb"
+POSITIVE = "#2f9e5f"
+NEGATIVE = "#c0563f"
+NEUTRAL = "#8a9a90"
 
-if model is None:
-    st.error("Model artifacts missing. Run 'python train.py' first.")
-    st.stop()
+_CSS = """
+<style>
+  .block-container { padding-top: 2.2rem; max-width: 1500px; }
+  .gr-hero { background: linear-gradient(135deg, #1f7a4d 0%, #2f9e5f 100%);
+             color: #fff; padding: 20px 26px; border-radius: 12px;
+             margin-bottom: 18px; }
+  .gr-hero h1 { margin: 0 0 4px; font-size: 25px; letter-spacing: .2px; }
+  .gr-hero p  { margin: 0; opacity: .92; font-size: 13.5px; }
+  .gr-card { border: 1px solid #d9e3dc; border-radius: 12px; padding: 18px 20px;
+             background: #fff; }
+  .gr-primary { background: #e7f2eb; border: 1px solid #b9d8c6;
+                border-radius: 12px; padding: 20px 24px; }
+  .gr-primary .crop { font-size: 34px; font-weight: 700; color: #1f7a4d;
+                      text-transform: uppercase; letter-spacing: .6px;
+                      line-height: 1.15; }
+  .gr-primary .conf { font-size: 14px; color: #5c6f63; margin-top: 2px; }
+  .gr-badge { display: inline-block; padding: 4px 12px; border-radius: 999px;
+              font-size: 12px; font-weight: 600; letter-spacing: .3px; }
+  .gr-badge.ok   { background: #e7f2eb; color: #1f7a4d; border: 1px solid #b9d8c6; }
+  .gr-badge.warn { background: #fdf3f2; color: #a6382a; border: 1px solid #eec4bd; }
+  .gr-metric { font-size: 40px; font-weight: 700; color: #1f7a4d;
+               line-height: 1.1; }
+  .gr-sub { font-size: 12.5px; color: #5c6f63; }
+  .gr-advisory { border-left: 3px solid #d9e3dc; padding: 9px 14px;
+                 margin-bottom: 9px; border-radius: 0 8px 8px 0; font-size: 13.5px; }
+  .gr-advisory.critical { border-left-color: #c0392b; background: #fdf3f2; }
+  .gr-advisory.warning  { border-left-color: #d98b0e; background: #fdf8ee; }
+  .gr-advisory.info     { border-left-color: #1f7a4d; background: #f4f8f5; }
+  .gr-advisory b { color: #14281d; }
+  div[data-testid="stMetricValue"] { font-size: 23px; }
+  div[data-testid="stProgress"] > div > div > div > div { background-color: #1f7a4d; }
+</style>
+"""
+st.markdown(_CSS, unsafe_allow_html=True)
 
-# 3. Weather Fetching Helper
-def get_live_weather(city, key):
-    if not key:
-        return None, "API Key missing."
-    url = f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={key}&units=metric"
+_SEVERITY_LABEL = {CRITICAL: "Critical", WARNING: "Advisory", INFO: "Nominal"}
+
+
+# --------------------------------------------------------------------------- #
+# Cached resources
+# --------------------------------------------------------------------------- #
+@st.cache_resource(show_spinner="Loading stacking ensemble…")
+def load_recommender() -> Optional[CropRecommender]:
+    """Load the deployed ensemble once per server process."""
     try:
-        res = requests.get(url, timeout=5).json()
-        if res.get("cod") == 200:
-            return {
-                "temp": res["main"]["temp"],
-                "humidity": res["main"]["humidity"],
-                "rainfall": res.get("rain", {}).get("1h", 0.0) * 24 * 30
-            }, None
-        return None, res.get("message", "Location not found.")
-    except Exception as e:
-        return None, str(e)
+        return CropRecommender().load()
+    except FileNotFoundError as exc:
+        st.error(f"**Model artefacts unavailable.**\n\n{exc}")
+        return None
 
-# --- UI Layout ---
-st.title("🌱 AI-Driven Precision Crop Recommendation Platform")
-st.markdown("**Multi-Model Stacking Ensemble** with **Live Weather Ingestion** and **Explainable AI (XAI)**")
-st.write("---")
 
-col_left, col_right = st.columns([1, 1.2])
+@st.cache_resource(show_spinner="Fitting explainability surrogate…")
+def load_explainer() -> Optional[ExplainerConsensus]:
+    """Build the TreeSHAP/LIME consensus engine once per server process."""
+    try:
+        return ExplainerConsensus().fit()
+    except Exception as exc:  # noqa: BLE001 - XAI is optional; never block the app.
+        logging.warning("Explainability engine unavailable: %s", exc)
+        return None
 
-with col_left:
-    st.subheader("1. Location & Climate Ingestion")
-    c1, c2 = st.columns(2)
-    with c1:
-        city_query = st.text_input("City / District", value="Udupi")
-    with c2:
-        api_key_query = st.text_input("OpenWeatherMap Key (Optional)", type="password")
 
-    temp_val, hum_val, rain_val = 26.0, 78.0, 190.0
+@st.cache_data(show_spinner=False)
+def cached_districts() -> List[str]:
+    """District list for the baseline selector."""
+    return list_districts()
 
-    if st.button("Fetch Live Weather"):
-        if api_key_query:
-            w_data, err = get_live_weather(city_query, api_key_query)
-            if w_data:
-                temp_val = float(w_data["temp"])
-                hum_val = float(w_data["humidity"])
-                rain_val = float(w_data["rainfall"])
-                st.success(f"Retrieved: {temp_val:.1f}°C, {hum_val:.0f}% Humidity")
-            else:
-                st.warning(f"Could not retrieve: {err}. Using default sliders.")
+
+@st.cache_resource
+def ensure_database() -> bool:
+    """Initialise the audit schema once per server process."""
+    try:
+        db_manager.init_db()
+        return True
+    except Exception as exc:  # noqa: BLE001 - a read-only volume must not crash the UI.
+        logging.warning("Audit database unavailable: %s", exc)
+        return False
+
+
+def _as_data_uri(document: str) -> str:
+    """Wrap a complete HTML document as a base64 ``data:`` URI.
+
+    The soil health card is a standalone document whose stylesheet targets
+    generic selectors (``body``, ``table``, ``section``). Injecting it into the
+    dashboard would leak those rules into Streamlit's own markup, so it is
+    rendered inside an isolated iframe instead.
+    """
+    encoded = base64.b64encode(document.encode("utf-8")).decode("ascii")
+    return f"data:text/html;base64,{encoded}"
+
+
+def _style_axes(axes: plt.Axes) -> None:
+    """Apply the shared minimal chart styling."""
+    for spine in ("top", "right"):
+        axes.spines[spine].set_visible(False)
+    for spine in ("left", "bottom"):
+        axes.spines[spine].set_color("#c9d6cd")
+    axes.tick_params(colors="#5c6f63", labelsize=9)
+    axes.grid(axis="x", color="#eef3f0", linewidth=0.8)
+    axes.set_axisbelow(True)
+
+
+# --------------------------------------------------------------------------- #
+# Sidebar — data ingestion
+# --------------------------------------------------------------------------- #
+def _seed_defaults() -> None:
+    """Populate widget state with defaults on first render.
+
+    Widgets below bind by ``key`` alone. Passing a ``value=`` as well as a
+    pre-populated session-state entry makes Streamlit warn that one of the two
+    is ignored, so the default is seeded here instead — once, before any widget
+    for that key is instantiated.
+    """
+    for name, default in DEFAULT_INPUTS.items():
+        st.session_state.setdefault(f"in_{name}", float(default))
+
+
+def render_sidebar() -> Dict[str, object]:
+    """Collect every model input. Returns the raw feature dict plus context."""
+    _seed_defaults()
+    st.sidebar.markdown("### 📍 Location & Climate")
+
+    districts = cached_districts()
+    district = st.sidebar.selectbox(
+        "District / Taluk",
+        options=districts,
+        index=districts.index("Udupi") if "Udupi" in districts else 0,
+        help="Selects the NFSM laboratory baseline used to pre-fill soil chemistry.",
+    )
+
+    city = st.sidebar.text_input("Weather station / City", value=district)
+    api_key = st.sidebar.text_input(
+        "OpenWeatherMap API key",
+        type="password",
+        help="Optional. Without a key the system uses calibrated offline defaults.",
+    )
+
+    if st.sidebar.button("🌦️ Sync live weather", width="stretch"):
+        reading = get_weather(city, api_key or None)
+        st.session_state["weather"] = reading
+        for key, value in reading.as_dict().items():
+            st.session_state[f"in_{key}"] = float(
+                np.clip(value, *FEATURE_BOUNDS[key])
+            )
+
+    weather = st.session_state.get("weather")
+    if weather is not None:
+        if weather.is_live:
+            st.sidebar.success(
+                f"Live · {weather.city} · {weather.temperature:.1f} °C · "
+                f"{weather.humidity:.0f} % RH"
+            )
         else:
-            st.info("No API key entered. Adjust sliders manually below.")
+            st.sidebar.info(f"Offline defaults — {weather.message}")
 
-    st.subheader("2. Soil Chemical Parameters")
-    selected_district = st.selectbox("Regional Soil Baseline (Fallback):", ["Manual Input"] + district_list)
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 🧪 Soil Chemistry")
 
-    col_n, col_p = st.columns(2)
-    with col_n:
-        n_in = st.number_input("Nitrogen (N) kg/ha", 0.0, 200.0, 60.0)
-    with col_p:
-        p_in = st.number_input("Phosphorus (P) kg/ha", 0.0, 200.0, 40.0)
+    if st.sidebar.button("📥 Load district baseline", width="stretch"):
+        baseline = get_district_baseline(district)
+        st.session_state["baseline"] = baseline
+        for key, value in baseline.as_dict().items():
+            st.session_state[f"in_{key}"] = float(np.clip(value, *FEATURE_BOUNDS[key]))
 
-    col_k, col_ph = st.columns(2)
-    with col_k:
-        k_in = st.number_input("Potassium (K) kg/ha", 0.0, 250.0, 45.0)
-    with col_ph:
-        ph_in = st.number_input("Soil pH", 3.0, 11.0, 6.2)
-
-    temp_in = st.slider("Temperature (°C)", 5.0, 50.0, temp_val)
-    hum_in = st.slider("Relative Humidity (%)", 10.0, 100.0, hum_val)
-    rain_in = st.slider("Rainfall (mm)", 10.0, 350.0, rain_val)
-
-    btn_recommend = st.button("🚀 Recommend Optimal Crops", type="primary", use_container_width=True)
-
-with col_right:
-    st.subheader("3. Model Decision & Suitability Ranking")
-    if btn_recommend:
-        raw = np.array([[n_in, p_in, k_in, temp_in, hum_in, ph_in, rain_in]])
-        scaled = scaler.transform(raw)
-        probs = model.predict_proba(scaled)[0]
-        top_idx = np.argsort(probs)[-3:][::-1]
-
-        best_crop = classes[top_idx[0]]
-        st.success(f"### Recommended Primary Crop: **{best_crop.upper()}** ({probs[top_idx[0]]*100:.1f}% Confidence)")
-
-        st.write("#### Top-3 Ranked Crops:")
-        for rank, idx in enumerate(top_idx, 1):
-            st.write(f"**{rank}. {classes[idx].capitalize()}** — {probs[idx]*100:.2f}% match")
-            st.progress(float(probs[idx]))
-
-        st.write("---")
-        st.subheader("4. Local Feature Attribution (Explainability)")
-        feat_labels = ['N', 'P', 'K', 'Temperature', 'Humidity', 'pH', 'Rainfall']
-        z_scores = scaled[0]
-
-        fig, ax = plt.subplots(figsize=(6.5, 3.5))
-        ax.barh(feat_labels, z_scores, color=['#2ca02c' if z >= 0 else '#d62728' for z in z_scores])
-        ax.axvline(0, color='black', linewidth=0.8, linestyle='--')
-        ax.set_xlabel("Input Deviation from Benchmark Mean (Z-Score)")
-        ax.set_title(f"Factors Driving {best_crop.capitalize()} Recommendation")
-        st.pyplot(fig)
-        st.caption("Green: Above-average condition | Red: Below-average condition")
-
-        st.write("---")
-        st.subheader("5. Actionable Soil Advisory")
-        if best_crop == "rice" and rain_in < 150:
-            st.info("💡 **Water Management:** Rice requires standing moisture. Supplement with canal or borewell irrigation.")
-        elif best_crop != "rice" and rain_in > 220:
-            st.info("💡 **Drainage Advisory:** High rainfall detected. Ensure drainage runoff channels to prevent root rot.")
+    baseline = st.session_state.get("baseline")
+    if baseline is not None:
+        if baseline.is_survey_backed:
+            st.sidebar.caption(
+                f"NFSM median of {baseline.sample_count:,} laboratory samples "
+                f"from {baseline.district}."
+            )
         else:
-            st.info(f"💡 Parameters align with physiological thresholds for **{best_crop.capitalize()}** cultivation.")
+            st.sidebar.caption(
+                f"Curated agro-climatic baseline for {baseline.district} "
+                f"(source: {baseline.source})."
+            )
+
+    values: Dict[str, float] = {}
+    for name in ("N", "P", "K"):
+        low, high = FEATURE_BOUNDS[name]
+        index = FEATURE_NAMES.index(name)
+        values[name] = st.sidebar.number_input(
+            f"{FEATURE_LABELS[index]} ({FEATURE_UNITS[index]})",
+            min_value=float(low),
+            max_value=float(high),
+            step=1.0,
+            key=f"in_{name}",
+        )
+
+    values["ph"] = st.sidebar.number_input(
+        "Soil pH",
+        min_value=float(FEATURE_BOUNDS["ph"][0]),
+        max_value=float(FEATURE_BOUNDS["ph"][1]),
+        step=0.1,
+        key="in_ph",
+    )
+
+    st.sidebar.markdown("### 🌡️ Microclimate")
+    for name in ("temperature", "humidity", "rainfall"):
+        low, high = FEATURE_BOUNDS[name]
+        index = FEATURE_NAMES.index(name)
+        values[name] = st.sidebar.slider(
+            f"{FEATURE_LABELS[index]} ({FEATURE_UNITS[index]})",
+            min_value=float(low),
+            max_value=float(high),
+            step=0.5,
+            key=f"in_{name}",
+        )
+
+    st.sidebar.markdown("---")
+    run = st.sidebar.button(
+        "🚀 Generate recommendation", type="primary", width="stretch"
+    )
+
+    return {"district": district, "city": city, "features": values, "run": run}
+
+
+# --------------------------------------------------------------------------- #
+# Tab 1 — Precision Recommendation
+# --------------------------------------------------------------------------- #
+def render_recommendation_tab(state: Dict[str, object]) -> None:
+    """Primary crop card, ranked alternatives, advisory, and Z-score profile."""
+    prediction = state.get("prediction")
+    if prediction is None:
+        st.info(
+            "Configure soil chemistry and microclimate in the sidebar, then "
+            "select **Generate recommendation**."
+        )
+        return
+
+    advisory = state["advisory"]
+    district = state["district"]
+
+    left, right = st.columns([1, 1.25], gap="large")
+
+    with left:
+        st.markdown(
+            f"""<div class="gr-primary">
+                  <div class="gr-sub">Recommended primary crop</div>
+                  <div class="crop">{prediction.crop}</div>
+                  <div class="conf">{prediction.confidence:.2f}% posterior
+                    probability · {district}</div>
+                </div>""",
+            unsafe_allow_html=True,
+        )
+
+        if prediction.is_low_confidence:
+            st.warning(
+                "Posterior below 50% — the reading falls between crop "
+                "envelopes. Weigh the runner-up options carefully."
+            )
+        if prediction.is_out_of_distribution:
+            st.warning(
+                f"Out-of-distribution input: "
+                f"**{', '.join(prediction.ood_features)}** exceed "
+                f"{OOD_ZSCORE_THRESHOLD:.0f}σ of the training distribution. "
+                f"This recommendation is an extrapolation."
+            )
+
+        st.markdown("#### Ranked suitability")
+        for candidate in prediction.top_k:
+            st.markdown(
+                f"**{candidate.rank}. {candidate.crop.capitalize()}** — "
+                f"{candidate.confidence_pct:.2f}%"
+            )
+            st.progress(min(max(candidate.probability, 0.0), 1.0))
+
+        st.markdown("#### Persist to audit ledger")
+        if st.button("💾 Commit recommendation", width="stretch"):
+            _persist(state)
+
+    with right:
+        st.markdown("#### Agronomic advisory")
+        for item in advisory.items:
+            st.markdown(
+                f"<div class='gr-advisory {item.severity}'>"
+                f"<b>{item.icon} {item.category}"
+                f" · {_SEVERITY_LABEL.get(item.severity, '')}</b><br>{item.message}"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+        if advisory.fertiliser_plan:
+            st.markdown("#### Fertiliser prescription (per hectare)")
+            st.dataframe(
+                pd.DataFrame(
+                    {
+                        "Product": list(advisory.fertiliser_plan),
+                        "Quantity (kg/ha)": list(advisory.fertiliser_plan.values()),
+                    }
+                ),
+                hide_index=True,
+                width="stretch",
+            )
+
+    st.markdown("---")
+    st.markdown("#### Input deviation from the benchmark training distribution")
+    st.caption(
+        "Each bar is the standardised deviation "
+        "z = (x − μ) ⁄ σ of an input from the benchmark mean encoded in "
+        f"`scaler.pkl`. Bars beyond ±{OOD_ZSCORE_THRESHOLD:.0f}σ mark "
+        "covariate shift."
+    )
+
+    frame = prediction.z_score_frame()
+    figure, axes = plt.subplots(figsize=(10, 3.4))
+    colours = [POSITIVE if z >= 0 else NEGATIVE for z in frame["z_score"]]
+    axes.barh(FEATURE_LABELS, frame["z_score"], color=colours, height=0.62)
+    axes.axvline(0, color="#14281d", linewidth=0.9)
+    for bound in (-OOD_ZSCORE_THRESHOLD, OOD_ZSCORE_THRESHOLD):
+        axes.axvline(bound, color=NEUTRAL, linewidth=0.8, linestyle="--")
+    axes.set_xlabel("Z-score (standard deviations from benchmark mean)", fontsize=10)
+    axes.invert_yaxis()
+    _style_axes(axes)
+    figure.tight_layout()
+    st.pyplot(figure, width="stretch")
+    plt.close(figure)
+
+
+def _persist(state: Dict[str, object]) -> None:
+    """Write the current recommendation to the audit ledger."""
+    if not ensure_database():
+        st.error("Audit database is unavailable in this environment.")
+        return
+
+    prediction = state["prediction"]
+    consensus = state.get("consensus")
+    features = prediction.raw_features
+    try:
+        record_id = db_manager.log_transaction(
+            district=str(state["district"]),
+            n=features["N"],
+            p=features["P"],
+            k=features["K"],
+            ph=features["ph"],
+            temperature=features["temperature"],
+            humidity=features["humidity"],
+            rainfall=features["rainfall"],
+            recommended_crop=prediction.crop,
+            confidence=prediction.confidence,
+            primary_shap_driver=consensus.primary_driver if consensus else None,
+            jaccard_index=consensus.jaccard if consensus else None,
+        )
+    except Exception as exc:  # noqa: BLE001 - surface, never crash the dashboard.
+        st.error(f"Could not persist the recommendation: {exc}")
+        return
+    st.success(f"Committed to the audit ledger as record #{record_id}.")
+
+
+# --------------------------------------------------------------------------- #
+# Tab 2 — Explainable AI Consensus
+# --------------------------------------------------------------------------- #
+def render_xai_tab(state: Dict[str, object]) -> None:
+    """Jaccard consensus card and side-by-side SHAP/LIME attributions."""
+    prediction = state.get("prediction")
+    if prediction is None:
+        st.info("Generate a recommendation first to audit its explanation.")
+        return
+
+    consensus = state.get("consensus")
+    if consensus is None:
+        st.warning(
+            "The explainability stack is unavailable. Install it with "
+            "`pip install shap lime` and restart."
+        )
+        return
+
+    badge = "ok" if consensus.is_high_fidelity else "warn"
+    left, right = st.columns([1, 1.6], gap="large")
+
+    with left:
+        st.markdown(
+            f"""<div class="gr-card">
+                  <div class="gr-sub">Jaccard Agreement Index (k={consensus.top_k})</div>
+                  <div class="gr-metric">{consensus.jaccard:.2f}</div>
+                  <div class="gr-sub">{consensus.intersection} of
+                    {consensus.union_size} drivers shared</div>
+                  <div style="margin-top:12px">
+                    <span class="gr-badge {badge}">{consensus.verdict}</span>
+                  </div>
+                </div>""",
+            unsafe_allow_html=True,
+        )
+        st.latex(
+            r"J(S, L) = \frac{|S \cap L|}{|S \cup L|} = "
+            rf"\frac{{{consensus.intersection}}}{{{consensus.union_size}}} = "
+            rf"{consensus.jaccard:.2f}"
+        )
+        st.caption(
+            f"S and L are the top-{consensus.top_k} driver sets from TreeSHAP "
+            f"and LIME. J ≥ {JACCARD_FIDELITY_THRESHOLD:.1f} is reported as "
+            f"High Fidelity."
+        )
+        st.markdown(f"**Interpretation.** {consensus.interpretation()}")
+
+        if not consensus.surrogate_agrees:
+            st.warning(
+                "The interpretable surrogate assigns this instance a different "
+                "class than the deployed ensemble, so the attribution below "
+                "transfers only partially."
+            )
+
+    with right:
+        metrics = st.columns(3)
+        metrics[0].metric("TreeSHAP top-k", ", ".join(consensus.shap_top_k))
+        metrics[1].metric("LIME top-k", ", ".join(consensus.lime_top_k))
+        metrics[2].metric(
+            "Consensus drivers", ", ".join(consensus.consensus_drivers) or "—"
+        )
+
+        figure, axes = plt.subplots(1, 2, figsize=(11, 3.9), sharey=True)
+        for index, (title, values, subtitle) in enumerate(
+            (
+                (
+                    "TreeSHAP",
+                    consensus.shap_values,
+                    "Exact Shapley attribution",
+                ),
+                (
+                    "LIME",
+                    consensus.lime_values,
+                    "Local surrogate coefficients",
+                ),
+            )
+        ):
+            ordered = sorted(values.items(), key=lambda kv: abs(kv[1]))
+            names = [name for name, _ in ordered]
+            weights = [weight for _, weight in ordered]
+            colours = [POSITIVE if w >= 0 else NEGATIVE for w in weights]
+            axes[index].barh(names, weights, color=colours, height=0.6)
+            axes[index].axvline(0, color="#14281d", linewidth=0.9)
+            axes[index].set_title(f"{title}\n{subtitle}", fontsize=10.5)
+            axes[index].set_xlabel("Attribution", fontsize=9.5)
+            _style_axes(axes[index])
+        figure.suptitle(
+            f"Local attributions for the {consensus.predicted_crop} decision",
+            fontsize=11.5,
+        )
+        figure.tight_layout()
+        st.pyplot(figure, width="stretch")
+        plt.close(figure)
+
+        st.caption(
+            "Attribution scales differ between the two methods — only the "
+            "*rankings* are compared, which is precisely what the Jaccard "
+            "index measures."
+        )
+
+    with st.expander("Attribution detail"):
+        st.dataframe(
+            consensus.to_frame().round(5), hide_index=True, width="stretch"
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Tab 3 — What-If Sensitivity Engine
+# --------------------------------------------------------------------------- #
+def render_sensitivity_tab(state: Dict[str, object]) -> None:
+    """Trace the decision surface along a single perturbed feature axis."""
+    prediction = state.get("prediction")
+    recommender = state.get("recommender")
+    if prediction is None or recommender is None:
+        st.info("Generate a recommendation first to run a sensitivity sweep.")
+        return
+
+    st.markdown("#### Single-factor perturbation analysis")
+    st.caption(
+        "One feature is swept across a ±100% band around its current value "
+        "while the other six are held constant. The curves trace the "
+        "ensemble's posterior along that axis, exposing the decision "
+        "boundaries it has learned."
+    )
+
+    controls = st.columns([1.2, 1, 1])
+    feature = controls[0].selectbox(
+        "Feature to perturb",
+        options=FEATURE_NAMES,
+        format_func=lambda name: FEATURE_LABELS[FEATURE_NAMES.index(name)],
+    )
+    span = controls[1].slider("Sweep range (±%)", 10, 100, 100, step=10)
+    n_curves = controls[2].slider("Crops to plot", 2, 8, 4)
+
+    anchor = [prediction.raw_features[name] for name in FEATURE_NAMES]
+    current = float(prediction.raw_features[feature])
+    low, high = FEATURE_BOUNDS[feature]
+
+    # A ±100% band around zero collapses to a point, so fall back to the full
+    # admissible range for features whose current reading is effectively zero.
+    if abs(current) < 1e-6:
+        sweep_low, sweep_high = low, high
     else:
-        st.info("Configure parameters on the left and click 'Recommend Optimal Crops'.")
+        sweep_low = current * (1 - span / 100.0)
+        sweep_high = current * (1 + span / 100.0)
+    grid = np.linspace(max(sweep_low, low), min(sweep_high, high), 80)
+
+    try:
+        grid, probabilities = recommender.sweep(anchor, feature, grid)
+    except ValidationError as exc:
+        st.error(f"Sweep failed: {exc}")
+        return
+
+    classes = recommender.class_names
+    # Rank by peak posterior across the sweep so crops that only become viable
+    # at one end of the range still appear.
+    ranked = np.argsort(probabilities.max(axis=0))[::-1][:n_curves]
+
+    figure, axes = plt.subplots(figsize=(11, 4.4))
+    palette = plt.cm.viridis(np.linspace(0.08, 0.86, len(ranked)))
+    for colour, index in zip(palette, ranked):
+        axes.plot(
+            grid,
+            probabilities[:, index],
+            linewidth=2.0,
+            color=colour,
+            label=classes[int(index)],
+        )
+    axes.axvline(
+        current,
+        color=NEGATIVE,
+        linestyle="--",
+        linewidth=1.4,
+        label=f"current = {current:.1f}",
+    )
+    index = FEATURE_NAMES.index(feature)
+    axes.set_xlabel(f"{FEATURE_LABELS[index]} ({FEATURE_UNITS[index]})", fontsize=10)
+    axes.set_ylabel("Posterior probability", fontsize=10)
+    axes.set_ylim(-0.02, 1.02)
+    axes.legend(frameon=False, fontsize=9, ncol=min(len(ranked) + 1, 5))
+    _style_axes(axes)
+    axes.grid(axis="y", color="#eef3f0", linewidth=0.8)
+    figure.tight_layout()
+    st.pyplot(figure, width="stretch")
+    plt.close(figure)
+
+    # Where does the argmax flip? Those crossings are the actionable thresholds.
+    argmax = probabilities.argmax(axis=1)
+    switches = [
+        (float(grid[i]), classes[int(argmax[i - 1])], classes[int(argmax[i])])
+        for i in range(1, len(argmax))
+        if argmax[i] != argmax[i - 1]
+    ]
+    summary = st.columns(3)
+    summary[0].metric(f"Current {feature}", f"{current:.1f}")
+    summary[1].metric("Sweep range", f"{grid.min():.1f} – {grid.max():.1f}")
+    summary[2].metric("Decision boundaries crossed", str(len(switches)))
+
+    if switches:
+        st.markdown("**Recommendation switch points**")
+        st.dataframe(
+            pd.DataFrame(
+                switches, columns=[f"{feature} threshold", "From crop", "To crop"]
+            ).round(2),
+            hide_index=True,
+            width="stretch",
+        )
+    else:
+        st.success(
+            f"The {prediction.crop} recommendation is stable across the entire "
+            f"±{span}% sweep of {feature} — this factor is not the binding "
+            f"constraint for this plot."
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Tab 4 — Audit Trail & Governance
+# --------------------------------------------------------------------------- #
+def render_audit_tab() -> None:
+    """Filterable view over the persisted recommendation ledger."""
+    st.markdown("#### Recommendation audit ledger")
+    st.caption(
+        "Every committed recommendation is recorded with its inputs, its "
+        "confidence, its dominant SHAP driver, and its explainer agreement "
+        "index — the evidence trail behind advice acted on in the field."
+    )
+
+    if not ensure_database():
+        st.error("Audit database is unavailable in this environment.")
+        return
+
+    controls = st.columns([1, 1, 1, 1])
+    today = date.today()
+    start = controls[0].date_input("From", value=today - timedelta(days=30))
+    end = controls[1].date_input("To", value=today)
+    limit = controls[2].number_input("Max records", 10, 5000, 200, step=10)
+
+    frame = db_manager.fetch_audit_history(
+        limit=int(limit),
+        start_date=str(start),
+        end_date=str(end),
+    )
+    controls[3].metric("Total records", f"{db_manager.count_records():,}")
+
+    if frame.empty:
+        st.info(
+            "No records in this window. Commit a recommendation from the "
+            "**Precision Recommendation** tab to populate the ledger."
+        )
+        return
+
+    summary = st.columns(4)
+    summary[0].metric("Records shown", f"{len(frame):,}")
+    summary[1].metric("Mean confidence", f"{frame['confidence'].mean():.1f}%")
+    summary[2].metric("Distinct crops", f"{frame['recommended_crop'].nunique()}")
+    jaccard = pd.to_numeric(frame["jaccard_index"], errors="coerce").dropna()
+    summary[3].metric(
+        "Mean Jaccard", f"{jaccard.mean():.2f}" if not jaccard.empty else "—"
+    )
+
+    st.dataframe(frame, hide_index=True, width="stretch", height=380)
+
+    buffer = io.StringIO()
+    frame.to_csv(buffer, index=False)
+    st.download_button(
+        "⬇️ Download audit trail (CSV)",
+        data=buffer.getvalue(),
+        file_name=f"greenroot_audit_{datetime.now():%Y%m%d_%H%M}.csv",
+        mime="text/csv",
+        width="stretch",
+    )
+
+    with st.expander("Distribution by recommended crop"):
+        counts = frame["recommended_crop"].value_counts()
+        figure, axes = plt.subplots(figsize=(9, max(2.4, 0.34 * len(counts))))
+        axes.barh(counts.index[::-1], counts.to_numpy()[::-1], color=ACCENT, height=0.6)
+        axes.set_xlabel("Recommendations logged", fontsize=10)
+        _style_axes(axes)
+        figure.tight_layout()
+        st.pyplot(figure, width="stretch")
+        plt.close(figure)
+
+
+# --------------------------------------------------------------------------- #
+# Tab 5 — Farmer Soil Health Card
+# --------------------------------------------------------------------------- #
+def render_card_tab(state: Dict[str, object]) -> None:
+    """Printable soil health card in three export formats."""
+    prediction = state.get("prediction")
+    if prediction is None:
+        st.info("Generate a recommendation first to issue a soil health card.")
+        return
+
+    card = build_card(
+        district=str(state["district"]),
+        prediction=prediction,
+        advisory=state["advisory"],
+        consensus=state.get("consensus"),
+    )
+
+    st.markdown("#### Printable soil health card")
+    st.caption(
+        "The card an extension officer hands to the cultivator. All three "
+        "exports render from one payload, so the figures cannot diverge."
+    )
+
+    st.iframe(_as_data_uri(render_html(card)), height=900)
+
+    stamp = f"{datetime.now():%Y%m%d_%H%M}"
+    downloads = st.columns(3)
+    downloads[0].download_button(
+        "⬇️ HTML (print-ready)",
+        data=render_html(card),
+        file_name=f"soil_health_card_{stamp}.html",
+        mime="text/html",
+        width="stretch",
+    )
+    downloads[1].download_button(
+        "⬇️ Markdown",
+        data=render_markdown(card),
+        file_name=f"soil_health_card_{stamp}.md",
+        mime="text/markdown",
+        width="stretch",
+    )
+    downloads[2].download_button(
+        "⬇️ Plain text",
+        data=render_text(card),
+        file_name=f"soil_health_card_{stamp}.txt",
+        mime="text/plain",
+        width="stretch",
+    )
+
+    with st.expander("Plain-text preview (SMS / thermal printer)"):
+        st.code(render_text(card), language=None)
+
+
+# --------------------------------------------------------------------------- #
+# Orchestration
+# --------------------------------------------------------------------------- #
+def main() -> None:
+    """Assemble the dashboard."""
+    st.markdown(
+        f"""<div class="gr-hero">
+              <h1>🌱 GREENROOT — Intelligent Precision Agriculture DSS</h1>
+              <p>Stacking ensemble meta-learning · multi-explainer consensus
+                 auditing · {REPORTED_CV_ACCURACY * 100:.2f}% stratified
+                 5-fold cross-validated accuracy across 22 crop classes</p>
+            </div>""",
+        unsafe_allow_html=True,
+    )
+
+    recommender = load_recommender()
+    if recommender is None:
+        st.stop()
+
+    inputs = render_sidebar()
+    ensure_database()
+
+    if inputs["run"]:
+        features: Dict[str, float] = inputs["features"]  # type: ignore[assignment]
+        vector = [features[name] for name in FEATURE_NAMES]
+        try:
+            prediction = recommender.predict(vector, top_k=3)
+        except ValidationError as exc:
+            st.error(f"**Invalid input.** {exc}")
+            st.stop()
+
+        advisory = generate_advisory(
+            prediction.crop,
+            prediction.raw_features,
+            confidence=prediction.confidence,
+            ood_features=prediction.ood_features,
+        )
+
+        consensus = None
+        explainer = load_explainer()
+        if explainer is not None:
+            with st.spinner("Auditing the decision with TreeSHAP and LIME…"):
+                try:
+                    consensus = explainer.explain(vector, prediction.crop)
+                except Exception as exc:  # noqa: BLE001 - XAI must never block.
+                    logging.warning("Explanation failed: %s", exc)
+
+        st.session_state["prediction"] = prediction
+        st.session_state["advisory"] = advisory
+        st.session_state["consensus"] = consensus
+        st.session_state["district"] = inputs["district"]
+
+    state: Dict[str, object] = {
+        "prediction": st.session_state.get("prediction"),
+        "advisory": st.session_state.get("advisory"),
+        "consensus": st.session_state.get("consensus"),
+        "district": st.session_state.get("district", inputs["district"]),
+        "recommender": recommender,
+    }
+
+    tabs = st.tabs(
+        [
+            "🎯 Precision Recommendation",
+            "🔍 Explainable AI Consensus",
+            "🧭 What-If Sensitivity",
+            "📋 Audit Trail & Governance",
+            "🧾 Farmer Soil Health Card",
+        ]
+    )
+    with tabs[0]:
+        render_recommendation_tab(state)
+    with tabs[1]:
+        render_xai_tab(state)
+    with tabs[2]:
+        render_sensitivity_tab(state)
+    with tabs[3]:
+        render_audit_tab()
+    with tabs[4]:
+        render_card_tab(state)
+
+    st.markdown("---")
+    st.caption(
+        f"GREENROOT · stacking ensemble (Random Forest + AdaBoost + k-NN → "
+        f"logistic-regression meta-learner) · {len(recommender.class_names)} "
+        f"crop classes · Jaccard consensus at k={CONSENSUS_TOP_K}. "
+        f"Advisory output only — corroborate with a certified laboratory soil "
+        f"test before committing a season."
+    )
+
+
+if __name__ == "__main__":
+    main()

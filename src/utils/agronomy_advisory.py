@@ -26,6 +26,7 @@ from typing import Dict, List, Optional, Sequence
 import pandas as pd
 
 from src.core.config import BENCHMARK_DATASET, FEATURE_NAMES
+from src.utils.plain_language import describe_quantity
 
 logger = logging.getLogger(__name__)
 
@@ -67,13 +68,20 @@ _PADDY_MINIMUM_RAINFALL_MM = 150.0
 #: |Z| within the crop's own envelope beyond which a parameter is off-target.
 _ENVELOPE_SIGMA = 1.5
 
+#: Everyday names for the macronutrients, used by the plain register.
+_NUTRIENT_WORDS: Dict[str, str] = {
+    "N": "nitrogen (the one that makes leaves green)",
+    "P": "phosphorus (the one that builds roots)",
+    "K": "potassium (the one that fills the grain)",
+}
+
 _PROFILE_LOCK = threading.Lock()
 _PROFILES: Optional[Dict[str, Dict[str, Dict[str, float]]]] = None
 
 
 @dataclass(frozen=True)
 class AdvisoryItem:
-    """One actionable recommendation.
+    """One actionable recommendation, in two registers.
 
     Attributes
     ----------
@@ -82,12 +90,25 @@ class AdvisoryItem:
     severity:
         :data:`CRITICAL`, :data:`WARNING`, or :data:`INFO`.
     message:
-        Field-ready instruction in plain language.
+        The technical statement, for the report and the evaluator.
+    plain:
+        The same advice in everyday words, for the farmer. Falls back to
+        :attr:`message` when no plain wording was supplied, so an item can
+        never render blank.
     """
 
     category: str
     severity: str
     message: str
+    plain: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.plain:
+            object.__setattr__(self, "plain", self.message)
+
+    def say(self, simple: bool = True) -> str:
+        """Return this item's text in the requested register."""
+        return self.plain if simple else self.message
 
     @property
     def icon(self) -> str:
@@ -126,9 +147,9 @@ class AdvisoryReport:
         """Return the items filed under ``category``."""
         return [item for item in self.items if item.category == category]
 
-    def messages(self) -> List[str]:
-        """Return every advisory message as plain strings."""
-        return [item.message for item in self.items]
+    def messages(self, simple: bool = False) -> List[str]:
+        """Return every advisory message, in the requested register."""
+        return [item.say(simple) for item in self.items]
 
 
 def _load_profiles(
@@ -203,6 +224,12 @@ def _hydrology_items(crop: str, rainfall: float, humidity: float) -> List[Adviso
                 f"{rainfall:.0f} mm cannot sustain — a shortfall of about "
                 f"{deficit:.0f} mm. Secure canal or borewell irrigation before "
                 f"transplanting, or switch to the runner-up crop.",
+                plain=(
+                    f"{crop.capitalize()} needs standing water in the field. "
+                    f"The rain you get ({rainfall:.0f} mm) is not enough. "
+                    f"Make sure you have canal or borewell water before you "
+                    f"plant. If you cannot, choose the next crop on the list."
+                ),
             )
         )
     elif lowered not in _PADDY_CROPS and rainfall > _WATERLOGGING_RAINFALL_MM:
@@ -214,6 +241,12 @@ def _hydrology_items(crop: str, rainfall: float, humidity: float) -> List[Adviso
                 f"{crop} plot drains freely. Open 30–45 cm field drains along "
                 f"the slope and raise beds to keep the root zone aerated; "
                 f"waterlogging here presents as root rot, not drought stress.",
+                plain=(
+                    f"You get a lot of rain ({rainfall:.0f} mm). Water will "
+                    f"stand in the field and rot the roots. Dig drainage "
+                    f"channels about knee-deep along the slope, and plant on "
+                    f"raised beds so the roots can breathe."
+                ),
             )
         )
     else:
@@ -224,6 +257,10 @@ def _hydrology_items(crop: str, rainfall: float, humidity: float) -> List[Adviso
                 f"Rainfall of {rainfall:.0f} mm sits within the workable range "
                 f"for {crop}. Schedule irrigation by soil moisture rather than "
                 f"by calendar.",
+                plain=(
+                    f"Your rain ({rainfall:.0f} mm) is right for {crop}. "
+                    f"Water when the soil feels dry, not on a fixed day."
+                ),
             )
         )
 
@@ -235,6 +272,11 @@ def _hydrology_items(crop: str, rainfall: float, humidity: float) -> List[Adviso
                 f"Relative humidity of {humidity:.0f}% sustains fungal "
                 f"pressure. Widen row spacing for canopy airflow and keep a "
                 f"prophylactic fungicide schedule ready.",
+                plain=(
+                    f"The air is very damp ({humidity:.0f}%). Damp air brings "
+                    f"fungus and leaf disease. Leave more space between rows "
+                    f"so air can move, and keep fungicide ready."
+                ),
             )
         )
     elif humidity <= 35.0:
@@ -244,6 +286,11 @@ def _hydrology_items(crop: str, rainfall: float, humidity: float) -> List[Adviso
                 INFO,
                 f"Low humidity ({humidity:.0f}%) raises evapotranspiration. "
                 f"Mulch the inter-row to curb surface evaporation losses.",
+                plain=(
+                    f"The air is dry ({humidity:.0f}%), so water leaves the "
+                    f"soil fast. Spread straw or dry leaves between the rows "
+                    f"to hold the moisture in."
+                ),
             )
         )
     return items
@@ -281,6 +328,10 @@ def _nutrition_items(
                     f"{max(required - tolerance, 0):.0f}–{required + tolerance:.0f} "
                     f"kg/ha band for {crop} (target {required:.0f}). A "
                     f"maintenance dose is sufficient.",
+                    plain=(
+                        f"Your {_NUTRIENT_WORDS[nutrient]} level is right for "
+                        f"{crop}. Just add your normal amount."
+                    ),
                 )
             )
             continue
@@ -300,6 +351,13 @@ def _nutrition_items(
                         f"nodules. Apply only a 15–20 kg/ha starter dose and "
                         f"inoculate the seed with Rhizobium instead — a full "
                         f"correction would suppress nodulation.",
+                        plain=(
+                            f"Your nitrogen looks low, but do not add much. "
+                            f"{crop.capitalize()} makes its own nitrogen in "
+                            f"its roots. Add only a small starter dose, and "
+                            f"treat the seed with Rhizobium culture. Too much "
+                            f"urea will stop the roots doing their job."
+                        ),
                     )
                 )
                 continue
@@ -312,6 +370,13 @@ def _nutrition_items(
                 else " Apply half at sowing and top-dress the remainder at "
                 "active vegetative growth."
             )
+            plain_split = (
+                " Do not put it all at once — split it into three doses "
+                "across the year, as this is a long-standing tree crop."
+                if lowered in _PERENNIAL_CROPS
+                else " Put half at sowing time, and the other half when the "
+                "plants are growing well."
+            )
             items.append(
                 AdvisoryItem(
                     "Nutrition",
@@ -319,6 +384,11 @@ def _nutrition_items(
                     f"{nutrient} is {deficit:.0f} kg/ha short of the {crop} "
                     f"envelope. Apply roughly {quantity:.0f} kg/ha of "
                     f"{product}.{split}",
+                    plain=(
+                        f"Your soil is low on "
+                        f"{_NUTRIENT_WORDS[nutrient]}. Add {product} — "
+                        f"{describe_quantity(quantity)}.{plain_split}"
+                    ),
                 )
             )
         else:
@@ -330,6 +400,13 @@ def _nutrition_items(
                     f"kg/ha. Withhold {nutrient}-bearing fertiliser this "
                     f"season; the surplus leaches to groundwater and, for "
                     f"nitrogen, drives vegetative growth at the cost of yield.",
+                    plain=(
+                        f"You already have plenty of "
+                        f"{_NUTRIENT_WORDS[nutrient]}. Do not add any more "
+                        f"this season. It would be money wasted, it washes "
+                        f"into the groundwater, and too much makes the plant "
+                        f"grow leaves instead of grain."
+                    ),
                 )
             )
     return items, gaps, plan
@@ -350,6 +427,14 @@ def _ph_items(crop: str, ph: float, profile: Dict[str, Dict[str, float]]) -> Lis
                 f"unavailable regardless of how much is applied. Incorporate "
                 f"agricultural lime at 2–3 t/ha two to three weeks before "
                 f"sowing to lift the reaction toward {target:.1f}.",
+                plain=(
+                    f"Your soil is very sour (pH {ph:.1f}). This is the first "
+                    f"thing to fix. In sour soil the plant cannot take in "
+                    f"phosphorus, however much fertiliser you add — so the "
+                    f"money is wasted. Spread agricultural lime, about "
+                    f"400–500 kg per acre, and mix it into the soil 2 to 3 "
+                    f"weeks before you sow."
+                ),
             )
         ]
     if ph > 8.2:
@@ -361,6 +446,13 @@ def _ph_items(crop: str, ph: float, profile: Dict[str, Dict[str, float]]) -> Lis
                 f"iron and zinc and induces interveinal chlorosis. Apply "
                 f"gypsum at 1.5–2 t/ha and incorporate well-decomposed organic "
                 f"matter to buffer the reaction toward {target:.1f}.",
+                plain=(
+                    f"Your soil is very salty and alkaline (pH {ph:.1f}). Fix "
+                    f"this first. The plant cannot take in iron and zinc, so "
+                    f"the leaves turn yellow between the veins. Spread gypsum, "
+                    f"about 300–400 kg per acre, and mix in well-rotted farm "
+                    f"yard manure or compost."
+                ),
             )
         ]
     if abs(ph - target) > 1.0:
@@ -373,6 +465,12 @@ def _ph_items(crop: str, ph: float, profile: Dict[str, Dict[str, float]]) -> Lis
                 f"{direction} the {target:.1f} optimum for {crop}. The crop "
                 f"remains viable, but expect reduced nutrient-use efficiency; "
                 f"organic matter will narrow the gap over successive seasons.",
+                plain=(
+                    f"Your soil pH is {ph:.1f}. {crop.capitalize()} likes it "
+                    f"nearer {target:.1f}. The crop will still grow, but it "
+                    f"will not use the fertiliser as well. Adding farm yard "
+                    f"manure or compost every season will slowly correct this."
+                ),
             )
         ]
     return [
@@ -381,6 +479,10 @@ def _ph_items(crop: str, ph: float, profile: Dict[str, Dict[str, float]]) -> Lis
             INFO,
             f"Soil pH of {ph:.1f} is well matched to {crop} "
             f"(optimum ≈ {target:.1f}); macronutrients stay plant-available.",
+            plain=(
+                f"Your soil pH ({ph:.1f}) suits {crop} well. The plant can "
+                f"take in the fertiliser you give it."
+            ),
         )
     ]
 
@@ -403,6 +505,12 @@ def _thermal_items(
                 f"{low:.1f}–{high:.1f} °C band {crop} was characterised over. "
                 f"Expect slower germination; delay sowing until the soil warms "
                 f"or use a raised-bed nursery.",
+                plain=(
+                    f"It is cool on your land ({temperature:.0f} °C). "
+                    f"{crop.capitalize()} likes {low:.0f} to {high:.0f} °C. "
+                    f"Seeds will come up slowly. Wait for warmer days to sow, "
+                    f"or raise the seedlings on a raised bed first."
+                ),
             )
         ]
     if temperature > high:
@@ -415,6 +523,13 @@ def _thermal_items(
                 f"flowering causes pollen sterility — shift sowing to the "
                 f"cooler part of the season and mulch to moderate soil "
                 f"temperature.",
+                plain=(
+                    f"It is hot on your land ({temperature:.0f} °C). "
+                    f"{crop.capitalize()} likes {low:.0f} to {high:.0f} °C. "
+                    f"Too much heat at flowering time means empty grain. Sow "
+                    f"in the cooler part of the season, and spread straw on "
+                    f"the soil to keep it cool."
+                ),
             )
         ]
     return [
@@ -423,6 +538,10 @@ def _thermal_items(
             INFO,
             f"Temperature of {temperature:.1f} °C falls inside the "
             f"{low:.1f}–{high:.1f} °C band for {crop}.",
+            plain=(
+                f"The temperature on your land ({temperature:.0f} °C) is "
+                f"good for {crop}."
+            ),
         )
     ]
 
@@ -479,6 +598,12 @@ def generate_advisory(
                 f"probability — the reading falls between crop envelopes. "
                 f"Review the runner-up options and corroborate with a "
                 f"laboratory soil test before committing the season.",
+                plain=(
+                    f"We are not very sure about {crop}. Your land sits "
+                    f"between what several crops like. Please look at the "
+                    f"other crops on the list, and get your soil tested at a "
+                    f"government lab before you decide."
+                ),
             )
         )
     if ood_features:
@@ -491,6 +616,12 @@ def generate_advisory(
                 f"deviations of the training distribution. The recommendation "
                 f"is an extrapolation rather than an interpolation and carries "
                 f"correspondingly wider uncertainty.",
+                plain=(
+                    f"Your readings for {names} are very unusual — far from "
+                    f"any farm we learned from. The advice may not fit your "
+                    f"land well. Please check the numbers, and get a soil "
+                    f"test if you can."
+                ),
             )
         )
 

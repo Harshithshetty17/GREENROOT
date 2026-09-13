@@ -1,6 +1,6 @@
 # GREENROOT — System Evaluation Summary
 
-_Generated 2026-09-13 16:13:43_
+_Generated 2026-09-13 17:14:42_
 
 ## 1. Classification Performance
 
@@ -21,17 +21,17 @@ Stratified 20% hold-out of `Crop_recommendation.csv` (2,200 samples, 22 classes)
 
 ## 2. Inference Latency
 
-100 stochastic single-sample inferences, end-to-end (validation + scaling + stacked forward pass).
+20 stochastic single-sample inferences, end-to-end (validation + scaling + stacked forward pass).
 
 | Statistic | Latency (ms) |
 |---|---:|
-| Mean | 15.772 |
-| P50 | 15.702 |
-| P95 | 16.499 |
-| P99 | 17.024 |
-| Max | 17.162 |
+| Mean | 15.298 |
+| P50 | 15.267 |
+| P95 | 15.930 |
+| P99 | 16.163 |
+| Max | 16.222 |
 
-Sustained throughput: **63 inferences/s** single-threaded.
+Sustained throughput: **65 inferences/s** single-threaded.
 
 ## 3. Out-of-Distribution Robustness
 
@@ -39,26 +39,12 @@ Karnataka NFSM field survey rows, which carry genuine covariate shift relative t
 
 | Metric | Value |
 |---|---:|
-| Field samples | 500 |
-| Mean confidence (benchmark) | 0.9645 |
-| Mean confidence (field) | 0.4143 |
-| Confidence degradation | 0.5502 |
-| Mean \|Z\| under shift | 2.517 |
+| Field samples | 100 |
+| Mean confidence (benchmark) | 0.9677 |
+| Mean confidence (field) | 0.4159 |
+| Confidence degradation | 0.5517 |
+| Mean \|Z\| under shift | 2.513 |
 | OOD detection rate | 100.0% |
-
-## 4. Multi-Explainer Consensus
-
-TreeSHAP versus LIME top-3 driver agreement, Jaccard index.
-
-| Metric | Value |
-|---|---:|
-| Instances audited | 30 |
-| Surrogate fidelity vs. ensemble | 0.9955 |
-| Mean Jaccard index | 0.6933 |
-| Median Jaccard index | 0.5000 |
-| Perfect agreement (J = 1.0) | 46.7% |
-| High fidelity (J >= 0.5) | 86.7% |
-| Mean explanation latency | 123.0 ms |
 
 ## Artefacts
 

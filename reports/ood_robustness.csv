@@ -1,9 +1,9 @@
 field_samples,mean_confidence_field,mean_confidence_benchmark,confidence_degradation,detected_ood_rate,mean_abs_z,low_confidence_rate_field,low_confidence_rate_benchmark,feature,field_mean,benchmark_mean,flag_rate
-500.0,0.4143,0.9645,0.5502,1.0,2.5172,0.968,0.0,__summary__,,,
-,,,,,4.375,,,N,212.016,50.552,0.938
-,,,,,0.725,,,P,29.448,53.363,0.0
-,,,,,4.251,,,K,263.394,48.149,0.822
-,,,,,0.354,,,temperature,27.35,25.616,0.0
-,,,,,0.1,,,humidity,71.825,71.482,0.0
-,,,,,0.85,,,ph,7.118,6.469,0.0
-,,,,,6.966,,,rainfall,486.197,103.464,1.0
+100.0,0.4159,0.9677,0.5517,1.0,2.5131,0.96,0.0,__summary__,,,
+,,,,,4.404,,,N,213.098,50.552,0.94
+,,,,,0.744,,,P,28.825,53.363,0.0
+,,,,,4.206,,,K,261.143,48.149,0.83
+,,,,,0.364,,,temperature,27.431,25.616,0.0
+,,,,,0.107,,,humidity,72.096,71.482,0.0
+,,,,,0.856,,,ph,7.124,6.469,0.0
+,,,,,6.91,,,rainfall,483.151,103.464,1.0

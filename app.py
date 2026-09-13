@@ -38,6 +38,17 @@ from src.core.config import (
     OOD_ZSCORE_THRESHOLD,
     REPORTED_CV_ACCURACY,
 )
+from src.core.theme import (
+    BRAND,
+    DIVERGING_HIGH,
+    DIVERGING_LOW,
+    INK,
+    MUTED,
+    apply_matplotlib_theme,
+    diverging_colours,
+    series_palette,
+    style_axes,
+)
 from src.database import db_manager
 from src.models.batch import BatchProcessor, BatchResult, MAX_BATCH_ROWS, build_template
 from src.models.inference import CropRecommender, ValidationError
@@ -45,6 +56,13 @@ from src.models.xai_engine import ExplainerConsensus
 from src.services.soil_service import get_district_baseline, list_districts
 from src.services.weather_service import get_weather
 from src.utils.agronomy_advisory import CRITICAL, INFO, WARNING, generate_advisory
+from src.utils.plain_language import (
+    category_name,
+    confidence_band,
+    describe_quantity,
+    severity_name,
+    text as tr,
+)
 from src.utils.report_generator import (
     PDFUnavailableError,
     build_card,
@@ -66,48 +84,96 @@ st.set_page_config(
 # --------------------------------------------------------------------------- #
 # Presentation constants
 # --------------------------------------------------------------------------- #
-ACCENT = "#1f7a4d"
-ACCENT_SOFT = "#e7f2eb"
-POSITIVE = "#2f9e5f"
-NEGATIVE = "#c0563f"
-NEUTRAL = "#8a9a90"
+apply_matplotlib_theme()
+
+#: Chart colours come from the validated palette in src/core/theme.py, never
+#: from literals here — that module documents why each data job gets which
+#: colour family, and the ordering it uses was run through the CVD validator.
+ACCENT = BRAND
+NEUTRAL = MUTED
 
 _CSS = """
 <style>
-  .block-container { padding-top: 2.2rem; max-width: 1500px; }
-  .gr-hero { background: linear-gradient(135deg, #1f7a4d 0%, #2f9e5f 100%);
-             color: #fff; padding: 20px 26px; border-radius: 12px;
-             margin-bottom: 18px; }
-  .gr-hero h1 { margin: 0 0 4px; font-size: 25px; letter-spacing: .2px; }
-  .gr-hero p  { margin: 0; opacity: .92; font-size: 13.5px; }
-  .gr-card { border: 1px solid #d9e3dc; border-radius: 12px; padding: 18px 20px;
-             background: #fff; }
-  .gr-primary { background: #e7f2eb; border: 1px solid #b9d8c6;
-                border-radius: 12px; padding: 20px 24px; }
-  .gr-primary .crop { font-size: 34px; font-weight: 700; color: #1f7a4d;
-                      text-transform: uppercase; letter-spacing: .6px;
-                      line-height: 1.15; }
-  .gr-primary .conf { font-size: 14px; color: #5c6f63; margin-top: 2px; }
-  .gr-badge { display: inline-block; padding: 4px 12px; border-radius: 999px;
-              font-size: 12px; font-weight: 600; letter-spacing: .3px; }
-  .gr-badge.ok   { background: #e7f2eb; color: #1f7a4d; border: 1px solid #b9d8c6; }
+  /* ---- Layout rhythm ------------------------------------------------- */
+  .block-container { padding-top: 2rem; padding-bottom: 3rem; max-width: 1480px; }
+  section[data-testid="stSidebar"] { border-right: 1px solid #e4ebe6; }
+  section[data-testid="stSidebar"] .block-container { padding-top: 1.2rem; }
+
+  /* ---- Hero ----------------------------------------------------------- */
+  .gr-hero {
+    background: linear-gradient(135deg, #1b6e45 0%, #2f9e5f 100%);
+    color: #fff; padding: 22px 28px; border-radius: 14px; margin-bottom: 20px;
+    box-shadow: 0 1px 2px rgba(20,40,29,.06), 0 8px 24px rgba(20,40,29,.08);
+  }
+  .gr-hero h1 { margin: 0 0 6px; font-size: 27px; font-weight: 700;
+                letter-spacing: -.2px; line-height: 1.15; }
+  .gr-hero p  { margin: 0; opacity: .94; font-size: 14.5px; line-height: 1.5;
+                max-width: 68ch; }
+
+  /* ---- Tabs ----------------------------------------------------------- */
+  button[data-baseweb="tab"] { font-size: 14.5px; font-weight: 500;
+                               padding: 10px 4px; }
+  div[data-baseweb="tab-highlight"] { background-color: #1f7a4d; height: 3px; }
+  button[data-baseweb="tab"][aria-selected="true"] { color: #1f7a4d;
+                                                     font-weight: 650; }
+
+  /* ---- Surfaces ------------------------------------------------------- */
+  .gr-card {
+    border: 1px solid #dfe8e2; border-radius: 14px; padding: 20px 22px;
+    background: #fff; box-shadow: 0 1px 2px rgba(20,40,29,.04);
+  }
+  .gr-primary {
+    background: linear-gradient(160deg, #eef7f1 0%, #e3f0e9 100%);
+    border: 1px solid #c3ddce; border-radius: 14px; padding: 22px 26px;
+    box-shadow: 0 1px 2px rgba(20,40,29,.04);
+  }
+  .gr-primary .crop {
+    font-size: 38px; font-weight: 750; color: #14603c; text-transform: uppercase;
+    letter-spacing: .4px; line-height: 1.1; margin: 4px 0 2px;
+  }
+  .gr-primary .conf { font-size: 14.5px; color: #3d5548; font-weight: 500; }
+
+  /* ---- Badges & metrics ----------------------------------------------- */
+  .gr-badge {
+    display: inline-block; padding: 5px 14px; border-radius: 999px;
+    font-size: 12.5px; font-weight: 650; letter-spacing: .2px;
+  }
+  .gr-badge.ok   { background: #e7f2eb; color: #14603c; border: 1px solid #b9d8c6; }
   .gr-badge.warn { background: #fdf3f2; color: #a6382a; border: 1px solid #eec4bd; }
-  .gr-metric { font-size: 40px; font-weight: 700; color: #1f7a4d;
-               line-height: 1.1; }
-  .gr-sub { font-size: 12.5px; color: #5c6f63; }
-  .gr-advisory { border-left: 3px solid #d9e3dc; padding: 9px 14px;
-                 margin-bottom: 9px; border-radius: 0 8px 8px 0; font-size: 13.5px; }
-  .gr-advisory.critical { border-left-color: #c0392b; background: #fdf3f2; }
-  .gr-advisory.warning  { border-left-color: #d98b0e; background: #fdf8ee; }
-  .gr-advisory.info     { border-left-color: #1f7a4d; background: #f4f8f5; }
-  .gr-advisory b { color: #14281d; }
-  div[data-testid="stMetricValue"] { font-size: 23px; }
-  div[data-testid="stProgress"] > div > div > div > div { background-color: #1f7a4d; }
+  .gr-metric { font-size: 42px; font-weight: 750; color: #1f7a4d;
+               line-height: 1.05; margin: 2px 0 4px; letter-spacing: -1px; }
+  .gr-sub { font-size: 13px; color: #5c6f63; line-height: 1.45; }
+  .gr-driver { font-size: 19px; font-weight: 650; color: #14281d;
+               line-height: 1.3; margin-top: 2px; }
+
+  /* ---- Advisory items -------------------------------------------------- */
+  .gr-advisory {
+    border-left: 3px solid #dfe8e2; padding: 11px 16px; margin-bottom: 10px;
+    border-radius: 0 10px 10px 0; font-size: 14px; line-height: 1.55;
+  }
+  .gr-advisory.critical { border-left-color: #c0392b; background: #fdf4f2; }
+  .gr-advisory.warning  { border-left-color: #d98b0e; background: #fdf9f0; }
+  .gr-advisory.info     { border-left-color: #1f7a4d; background: #f3f8f5; }
+  .gr-advisory b { color: #14281d; font-weight: 650; }
+
+  /* ---- Widgets --------------------------------------------------------- */
+  div[data-testid="stMetricValue"] { font-size: 24px; font-weight: 700;
+                                     color: #14281d; }
+  div[data-testid="stMetricLabel"] { font-size: 13px; color: #5c6f63; }
+  div[data-testid="stProgressBarTrack"] { background-color: #e3ebe6; height: 10px; }
+  div[data-testid="stProgressBarTrack"] > div { background-color: #1f7a4d; }
+  /* Larger, calmer tap targets: this is used on a phone in a field. */
+  .stButton button { font-weight: 600; padding: .55rem 1rem; }
+  .stDownloadButton button { font-weight: 600; }
+  div[data-testid="stExpander"] details {
+    border: 1px solid #e4ebe6; border-radius: 10px;
+  }
+  /* Tables: readable rather than dense. */
+  div[data-testid="stDataFrame"] { border-radius: 10px; }
 </style>
 """
 st.markdown(_CSS, unsafe_allow_html=True)
 
-_SEVERITY_LABEL = {CRITICAL: "Critical", WARNING: "Advisory", INFO: "Nominal"}
 
 
 # --------------------------------------------------------------------------- #
@@ -171,15 +237,23 @@ def _as_data_uri(document: str) -> str:
     return f"data:text/html;base64,{encoded}"
 
 
-def _style_axes(axes: plt.Axes) -> None:
-    """Apply the shared minimal chart styling."""
-    for spine in ("top", "right"):
-        axes.spines[spine].set_visible(False)
-    for spine in ("left", "bottom"):
-        axes.spines[spine].set_color("#c9d6cd")
-    axes.tick_params(colors="#5c6f63", labelsize=9)
-    axes.grid(axis="x", color="#eef3f0", linewidth=0.8)
-    axes.set_axisbelow(True)
+def _style_axes(axes: plt.Axes, *, grid_axis: str = "x") -> None:
+    """Apply the shared chart styling defined in the theme module."""
+    style_axes(axes, grid_axis=grid_axis)
+
+
+def is_simple() -> bool:
+    """``True`` when the dashboard is in farmer-facing plain-language mode."""
+    return bool(st.session_state.get("simple_mode", True))
+
+
+def _feature_word(feature: str, simple: bool = True) -> str:
+    """Return a short display name for a feature, plain or technical."""
+    if not simple:
+        return feature
+    return tr(f"field_{feature}", True).split(" — ")[0].replace(" (N)", "").replace(
+        " (P)", ""
+    ).replace(" (K)", "")
 
 
 # --------------------------------------------------------------------------- #
@@ -200,24 +274,47 @@ def _seed_defaults() -> None:
 def render_sidebar() -> Dict[str, object]:
     """Collect every model input. Returns the raw feature dict plus context."""
     _seed_defaults()
-    st.sidebar.markdown("### 📍 Location & Climate")
+
+    # Farmers are the primary users, so plain language is the default; the
+    # technical register stays one click away rather than being removed.
+    st.sidebar.toggle(
+        "Simple words",
+        value=True,
+        key="simple_mode",
+        help="Off shows the technical wording used in the project report.",
+    )
+    simple = is_simple()
+    st.sidebar.markdown("---")
+    st.sidebar.markdown(f"### {tr('sidebar_place', simple)}")
 
     districts = cached_districts()
     district = st.sidebar.selectbox(
-        "District / Taluk",
+        tr("district", simple),
         options=districts,
         index=districts.index("Udupi") if "Udupi" in districts else 0,
-        help="Selects the NFSM laboratory baseline used to pre-fill soil chemistry.",
+        help=(
+            "We use typical soil readings from your area to fill in the form."
+            if simple
+            else "Selects the NFSM laboratory baseline used to pre-fill soil "
+            "chemistry."
+        ),
     )
 
-    city = st.sidebar.text_input("Weather station / City", value=district)
+    city = st.sidebar.text_input(
+        "Nearest town" if simple else "Weather station / City", value=district
+    )
     api_key = st.sidebar.text_input(
-        "OpenWeatherMap API key",
+        "Weather key (optional)" if simple else "OpenWeatherMap API key",
         type="password",
-        help="Optional. Without a key the system uses calibrated offline defaults.",
+        help=(
+            "Leave this empty if you do not have one — the app still works."
+            if simple
+            else "Optional. Without a key the system uses calibrated offline "
+            "defaults."
+        ),
     )
 
-    if st.sidebar.button("🌦️ Sync live weather", width="stretch"):
+    if st.sidebar.button(tr("get_weather", simple), width="stretch"):
         reading = get_weather(city, api_key or None)
         st.session_state["weather"] = reading
         for key, value in reading.as_dict().items():
@@ -233,12 +330,16 @@ def render_sidebar() -> Dict[str, object]:
                 f"{weather.humidity:.0f} % RH"
             )
         else:
-            st.sidebar.info(f"Offline defaults — {weather.message}")
+            st.sidebar.info(
+                "Using typical weather for your area."
+                if simple
+                else f"Offline defaults — {weather.message}"
+            )
 
     st.sidebar.markdown("---")
-    st.sidebar.markdown("### 🧪 Soil Chemistry")
+    st.sidebar.markdown(f"### {tr('sidebar_soil', simple)}")
 
-    if st.sidebar.button("📥 Load district baseline", width="stretch"):
+    if st.sidebar.button(tr("load_baseline", simple), width="stretch"):
         baseline = get_district_baseline(district)
         st.session_state["baseline"] = baseline
         for key, value in baseline.as_dict().items():
@@ -248,12 +349,17 @@ def render_sidebar() -> Dict[str, object]:
     if baseline is not None:
         if baseline.is_survey_backed:
             st.sidebar.caption(
-                f"NFSM median of {baseline.sample_count:,} laboratory samples "
-                f"from {baseline.district}."
+                f"Typical of {baseline.sample_count:,} soil tests from "
+                f"{baseline.district}."
+                if simple
+                else f"NFSM median of {baseline.sample_count:,} laboratory "
+                f"samples from {baseline.district}."
             )
         else:
             st.sidebar.caption(
-                f"Curated agro-climatic baseline for {baseline.district} "
+                f"Typical soil for {baseline.district}."
+                if simple
+                else f"Curated agro-climatic baseline for {baseline.district} "
                 f"(source: {baseline.source})."
             )
 
@@ -262,27 +368,30 @@ def render_sidebar() -> Dict[str, object]:
         low, high = FEATURE_BOUNDS[name]
         index = FEATURE_NAMES.index(name)
         values[name] = st.sidebar.number_input(
-            f"{FEATURE_LABELS[index]} ({FEATURE_UNITS[index]})",
+            tr(f"field_{name}", simple)
+            if simple
+            else f"{FEATURE_LABELS[index]} ({FEATURE_UNITS[index]})",
             min_value=float(low),
             max_value=float(high),
             step=1.0,
             key=f"in_{name}",
+            help=f"Measured in {FEATURE_UNITS[index]}." if simple else None,
         )
 
     values["ph"] = st.sidebar.number_input(
-        "Soil pH",
+        tr("field_ph", simple),
         min_value=float(FEATURE_BOUNDS["ph"][0]),
         max_value=float(FEATURE_BOUNDS["ph"][1]),
         step=0.1,
         key="in_ph",
     )
 
-    st.sidebar.markdown("### 🌡️ Microclimate")
+    st.sidebar.markdown(f"### {tr('sidebar_weather', simple)}")
     for name in ("temperature", "humidity", "rainfall"):
         low, high = FEATURE_BOUNDS[name]
         index = FEATURE_NAMES.index(name)
         values[name] = st.sidebar.slider(
-            f"{FEATURE_LABELS[index]} ({FEATURE_UNITS[index]})",
+            f"{tr(f'field_{name}', simple)} ({FEATURE_UNITS[index]})",
             min_value=float(low),
             max_value=float(high),
             step=0.5,
@@ -291,7 +400,7 @@ def render_sidebar() -> Dict[str, object]:
 
     st.sidebar.markdown("---")
     run = st.sidebar.button(
-        "🚀 Generate recommendation", type="primary", width="stretch"
+        tr("run", simple), type="primary", width="stretch"
     )
 
     return {"district": district, "city": city, "features": values, "run": run}
@@ -302,96 +411,132 @@ def render_sidebar() -> Dict[str, object]:
 # --------------------------------------------------------------------------- #
 def render_recommendation_tab(state: Dict[str, object]) -> None:
     """Primary crop card, ranked alternatives, advisory, and Z-score profile."""
+    simple = is_simple()
     prediction = state.get("prediction")
     if prediction is None:
         st.info(
-            "Configure soil chemistry and microclimate in the sidebar, then "
-            "select **Generate recommendation**."
+            "Fill in your soil test and weather on the left, then press "
+            "**" + tr("run", simple) + "**."
+            if simple
+            else "Configure soil chemistry and microclimate in the sidebar, "
+            "then select **Generate recommendation**."
         )
         return
 
     advisory = state["advisory"]
     district = state["district"]
+    band = confidence_band(prediction.confidence)
 
     left, right = st.columns([1, 1.25], gap="large")
 
     with left:
+        headline = (
+            f"{band.label} · {prediction.confidence:.0f} out of 100"
+            if simple
+            else f"{prediction.confidence:.2f}% posterior probability"
+        )
         st.markdown(
             f"""<div class="gr-primary">
-                  <div class="gr-sub">Recommended primary crop</div>
+                  <div class="gr-sub">{tr('primary_label', simple)}</div>
                   <div class="crop">{prediction.crop}</div>
-                  <div class="conf">{prediction.confidence:.2f}% posterior
-                    probability · {district}</div>
+                  <div class="conf">{headline} · {district}</div>
                 </div>""",
             unsafe_allow_html=True,
         )
+        if simple:
+            st.caption(band.detail)
 
         if prediction.is_low_confidence:
-            st.warning(
-                "Posterior below 50% — the reading falls between crop "
-                "envelopes. Weigh the runner-up options carefully."
-            )
+            st.warning(tr("low_confidence", simple))
         if prediction.is_out_of_distribution:
+            names = ", ".join(prediction.ood_features)
             st.warning(
-                f"Out-of-distribution input: "
-                f"**{', '.join(prediction.ood_features)}** exceed "
+                f"{tr('unusual_input', simple)} ({names})"
+                if simple
+                else f"Out-of-distribution input: **{names}** exceed "
                 f"{OOD_ZSCORE_THRESHOLD:.0f}σ of the training distribution. "
                 f"This recommendation is an extrapolation."
             )
 
-        st.markdown("#### Ranked suitability")
+        st.markdown(f"#### {tr('ranked_heading', simple)}")
         for candidate in prediction.top_k:
-            st.markdown(
-                f"**{candidate.rank}. {candidate.crop.capitalize()}** — "
-                f"{candidate.confidence_pct:.2f}%"
-            )
+            if simple:
+                score = (
+                    "less than 1 out of 100"
+                    if candidate.confidence_pct < 1
+                    else f"{candidate.confidence_pct:.0f} out of 100"
+                )
+                label = f"**{candidate.rank}. {candidate.crop.capitalize()}** — {score}"
+            else:
+                label = (
+                    f"**{candidate.rank}. {candidate.crop.capitalize()}** — "
+                    f"{candidate.confidence_pct:.2f}%"
+                )
+            st.markdown(label)
             st.progress(min(max(candidate.probability, 0.0), 1.0))
 
-        st.markdown("#### Persist to audit ledger")
-        if st.button("💾 Commit recommendation", width="stretch"):
+        st.markdown(f"#### {tr('save_heading', simple)}")
+        if st.button(tr("save_button", simple), width="stretch"):
             _persist(state)
 
     with right:
-        st.markdown("#### Agronomic advisory")
+        st.markdown(f"#### {tr('advisory_heading', simple)}")
         for item in advisory.items:
             st.markdown(
                 f"<div class='gr-advisory {item.severity}'>"
-                f"<b>{item.icon} {item.category}"
-                f" · {_SEVERITY_LABEL.get(item.severity, '')}</b><br>{item.message}"
-                f"</div>",
+                f"<b>{item.icon} {category_name(item.category, simple)}"
+                f" · {severity_name(item.severity, simple)}</b><br>"
+                f"{item.say(simple)}</div>",
                 unsafe_allow_html=True,
             )
 
         if advisory.fertiliser_plan:
-            st.markdown("#### Fertiliser prescription (per hectare)")
-            st.dataframe(
-                pd.DataFrame(
+            st.markdown(f"#### {tr('fertiliser_heading', simple)}")
+            if simple:
+                # Farmers buy 50 kg sacks and work in acres, so lead with that.
+                table = pd.DataFrame(
+                    {
+                        "Fertiliser": list(advisory.fertiliser_plan),
+                        "How much to add": [
+                            describe_quantity(v)
+                            for v in advisory.fertiliser_plan.values()
+                        ],
+                    }
+                )
+            else:
+                table = pd.DataFrame(
                     {
                         "Product": list(advisory.fertiliser_plan),
                         "Quantity (kg/ha)": list(advisory.fertiliser_plan.values()),
                     }
-                ),
-                hide_index=True,
-                width="stretch",
-            )
+                )
+            st.dataframe(table, hide_index=True, width="stretch")
 
     st.markdown("---")
-    st.markdown("#### Input deviation from the benchmark training distribution")
-    st.caption(
-        "Each bar is the standardised deviation "
-        "z = (x − μ) ⁄ σ of an input from the benchmark mean encoded in "
-        f"`scaler.pkl`. Bars beyond ±{OOD_ZSCORE_THRESHOLD:.0f}σ mark "
-        "covariate shift."
-    )
+    st.markdown(f"#### {tr('compare_heading', simple)}")
+    st.caption(tr("compare_caption", simple))
 
     frame = prediction.z_score_frame()
+    labels = (
+        [tr(f"field_{name}", simple) .split(" — ")[0] for name in FEATURE_NAMES]
+        if simple
+        else FEATURE_LABELS
+    )
     figure, axes = plt.subplots(figsize=(10, 3.4))
-    colours = [POSITIVE if z >= 0 else NEGATIVE for z in frame["z_score"]]
-    axes.barh(FEATURE_LABELS, frame["z_score"], color=colours, height=0.62)
-    axes.axvline(0, color="#14281d", linewidth=0.9)
+    # Diverging, not status: a high nitrogen reading is neither good nor bad,
+    # it is simply above the reference mean.
+    axes.barh(
+        labels, frame["z_score"],
+        color=diverging_colours(frame["z_score"]), height=0.62,
+    )
+    axes.axvline(0, color=INK, linewidth=0.9)
     for bound in (-OOD_ZSCORE_THRESHOLD, OOD_ZSCORE_THRESHOLD):
-        axes.axvline(bound, color=NEUTRAL, linewidth=0.8, linestyle="--")
-    axes.set_xlabel("Z-score (standard deviations from benchmark mean)", fontsize=10)
+        axes.axvline(bound, color=MUTED, linewidth=0.8)
+    axes.set_xlabel(
+        "More than usual  →" if simple
+        else "Z-score (standard deviations from benchmark mean)",
+        fontsize=10,
+    )
     axes.invert_yaxis()
     _style_axes(axes)
     figure.tight_layout()
@@ -434,88 +579,150 @@ def _persist(state: Dict[str, object]) -> None:
 # --------------------------------------------------------------------------- #
 def render_xai_tab(state: Dict[str, object]) -> None:
     """Jaccard consensus card and side-by-side SHAP/LIME attributions."""
+    simple = is_simple()
     prediction = state.get("prediction")
     if prediction is None:
-        st.info("Generate a recommendation first to audit its explanation.")
+        st.info(
+            "Get a crop recommendation first, then come here to see why."
+            if simple
+            else "Generate a recommendation first to audit its explanation."
+        )
         return
+
+    st.markdown(f"#### {tr('why_heading', simple)}")
+    st.caption(tr("why_intro", simple))
 
     consensus = state.get("consensus")
     if consensus is None:
         st.warning(
-            "The explainability stack is unavailable. Install it with "
+            "The 'why' checks are not available on this computer."
+            if simple
+            else "The explainability stack is unavailable. Install it with "
             "`pip install shap lime` and restart."
         )
         return
 
     badge = "ok" if consensus.is_high_fidelity else "warn"
-    left, right = st.columns([1, 1.6], gap="large")
+    left, right = st.columns([1, 1.15], gap="large")
 
     with left:
+        verdict = tr("agree_yes" if consensus.is_high_fidelity else "agree_no", simple)
+        if simple:
+            score = f"{consensus.intersection} of {consensus.union_size}"
+            sub_line = "reasons both checks agree on"
+        else:
+            score = f"{consensus.jaccard:.2f}"
+            sub_line = (
+                f"{consensus.intersection} of {consensus.union_size} drivers shared"
+            )
         st.markdown(
             f"""<div class="gr-card">
-                  <div class="gr-sub">Jaccard Agreement Index (k={consensus.top_k})</div>
-                  <div class="gr-metric">{consensus.jaccard:.2f}</div>
-                  <div class="gr-sub">{consensus.intersection} of
-                    {consensus.union_size} drivers shared</div>
+                  <div class="gr-sub">{tr('agreement_label', simple)}</div>
+                  <div class="gr-metric">{score}</div>
+                  <div class="gr-sub">{sub_line}</div>
                   <div style="margin-top:12px">
-                    <span class="gr-badge {badge}">{consensus.verdict}</span>
+                    <span class="gr-badge {badge}">{verdict}</span>
                   </div>
                 </div>""",
             unsafe_allow_html=True,
         )
-        st.latex(
-            r"J(S, L) = \frac{|S \cap L|}{|S \cup L|} = "
-            rf"\frac{{{consensus.intersection}}}{{{consensus.union_size}}} = "
-            rf"{consensus.jaccard:.2f}"
-        )
-        st.caption(
-            f"S and L are the top-{consensus.top_k} driver sets from TreeSHAP "
-            f"and LIME. J ≥ {JACCARD_FIDELITY_THRESHOLD:.1f} is reported as "
-            f"High Fidelity."
-        )
-        st.markdown(f"**Interpretation.** {consensus.interpretation()}")
+        if simple:
+            st.markdown(
+                "**What this means.** "
+                + (
+                    "Both ways of checking picked the same main reasons, so "
+                    "this advice rests on solid ground."
+                    if consensus.is_high_fidelity
+                    else "The two checks picked different reasons. Your land "
+                    "sits close to the line between two crops. Treat this "
+                    "advice as a starting point and get a soil test."
+                )
+            )
+        else:
+            st.latex(
+                r"J(S, L) = \frac{|S \cap L|}{|S \cup L|} = "
+                rf"\frac{{{consensus.intersection}}}{{{consensus.union_size}}} = "
+                rf"{consensus.jaccard:.2f}"
+            )
+            st.caption(
+                f"S and L are the top-{consensus.top_k} driver sets from "
+                f"TreeSHAP and LIME. J ≥ {JACCARD_FIDELITY_THRESHOLD:.1f} is "
+                f"reported as High Fidelity."
+            )
+            st.markdown(f"**Interpretation.** {consensus.interpretation()}")
 
         if not consensus.surrogate_agrees:
             st.warning(
-                "The interpretable surrogate assigns this instance a different "
-                "class than the deployed ensemble, so the attribution below "
-                "transfers only partially."
+                "The two checks were run on a slightly simpler model that "
+                "picked a different crop here, so read the reasons below with "
+                "care."
+                if simple
+                else "The interpretable surrogate assigns this instance a "
+                "different class than the deployed ensemble, so the "
+                "attribution below transfers only partially."
             )
 
     with right:
-        metrics = st.columns(3)
-        metrics[0].metric("TreeSHAP top-k", ", ".join(consensus.shap_top_k))
-        metrics[1].metric("LIME top-k", ", ".join(consensus.lime_top_k))
-        metrics[2].metric(
-            "Consensus drivers", ", ".join(consensus.consensus_drivers) or "—"
-        )
+        def driver_names(names) -> str:
+            return ", ".join(_feature_word(n, simple) for n in names) or "—"
 
-        figure, axes = plt.subplots(1, 2, figsize=(11, 3.9), sharey=True)
+        metrics = st.columns(3)
+        for column, heading, names in (
+            (metrics[0], f"{tr('check_one', simple)} says", consensus.shap_top_k),
+            (metrics[1], f"{tr('check_two', simple)} says", consensus.lime_top_k),
+            (
+                metrics[2],
+                "Both agree on" if simple else "Consensus drivers",
+                consensus.consensus_drivers,
+            ),
+        ):
+            column.markdown(
+                f"<div class='gr-sub'>{heading}</div>"
+                f"<div class='gr-driver'>{driver_names(names)}</div>",
+                unsafe_allow_html=True,
+            )
+
+    st.markdown("")
+    with st.container():
+        figure, axes = plt.subplots(1, 2, figsize=(13, 4.2), sharey=True)
+        plain_names = {
+            name: _feature_word(name, simple) for name in FEATURE_NAMES
+        }
         for index, (title, values, subtitle) in enumerate(
             (
                 (
-                    "TreeSHAP",
+                    tr("check_one", simple),
                     consensus.shap_values,
-                    "Exact Shapley attribution",
+                    "How much each thing pushed the answer"
+                    if simple
+                    else "Exact Shapley attribution",
                 ),
                 (
-                    "LIME",
+                    tr("check_two", simple),
                     consensus.lime_values,
-                    "Local surrogate coefficients",
+                    "A second opinion, worked out differently"
+                    if simple
+                    else "Local surrogate coefficients",
                 ),
             )
         ):
             ordered = sorted(values.items(), key=lambda kv: abs(kv[1]))
-            names = [name for name, _ in ordered]
+            names = [plain_names.get(name, name) for name, _ in ordered]
             weights = [weight for _, weight in ordered]
-            colours = [POSITIVE if w >= 0 else NEGATIVE for w in weights]
-            axes[index].barh(names, weights, color=colours, height=0.6)
-            axes[index].axvline(0, color="#14281d", linewidth=0.9)
+            axes[index].barh(
+                names, weights, color=diverging_colours(weights), height=0.6
+            )
+            axes[index].axvline(0, color=INK, linewidth=0.9)
             axes[index].set_title(f"{title}\n{subtitle}", fontsize=10.5)
-            axes[index].set_xlabel("Attribution", fontsize=9.5)
+            axes[index].set_xlabel(
+                "How strongly it pushed  →" if simple else "Attribution",
+                fontsize=9.5,
+            )
             _style_axes(axes[index])
         figure.suptitle(
-            f"Local attributions for the {consensus.predicted_crop} decision",
+            f"Why {consensus.predicted_crop} was chosen"
+            if simple
+            else f"Local attributions for the {consensus.predicted_crop} decision",
             fontsize=11.5,
         )
         figure.tight_layout()
@@ -523,12 +730,15 @@ def render_xai_tab(state: Dict[str, object]) -> None:
         plt.close(figure)
 
         st.caption(
-            "Attribution scales differ between the two methods — only the "
-            "*rankings* are compared, which is precisely what the Jaccard "
+            "The two checks use different scales, so compare the *order* of "
+            "the bars, not their length."
+            if simple
+            else "Attribution scales differ between the two methods — only "
+            "the *rankings* are compared, which is precisely what the Jaccard "
             "index measures."
         )
 
-    with st.expander("Attribution detail"):
+    with st.expander("See the numbers" if simple else "Attribution detail"):
         st.dataframe(
             consensus.to_frame().round(5), hide_index=True, width="stretch"
         )
@@ -539,28 +749,39 @@ def render_xai_tab(state: Dict[str, object]) -> None:
 # --------------------------------------------------------------------------- #
 def render_sensitivity_tab(state: Dict[str, object]) -> None:
     """Trace the decision surface along a single perturbed feature axis."""
+    simple = is_simple()
     prediction = state.get("prediction")
     recommender = state.get("recommender")
     if prediction is None or recommender is None:
-        st.info("Generate a recommendation first to run a sensitivity sweep.")
+        st.info(
+            "Get a crop recommendation first, then try changing things here."
+            if simple
+            else "Generate a recommendation first to run a sensitivity sweep."
+        )
         return
 
-    st.markdown("#### Single-factor perturbation analysis")
-    st.caption(
-        "One feature is swept across a ±100% band around its current value "
-        "while the other six are held constant. The curves trace the "
-        "ensemble's posterior along that axis, exposing the decision "
-        "boundaries it has learned."
-    )
+    st.markdown(f"#### {tr('whatif_heading', simple)}")
+    st.caption(tr("whatif_intro", simple))
 
-    controls = st.columns([1.2, 1, 1])
+    controls = st.columns([1.4, 1, 1])
     feature = controls[0].selectbox(
-        "Feature to perturb",
+        tr("whatif_feature", simple),
         options=FEATURE_NAMES,
-        format_func=lambda name: FEATURE_LABELS[FEATURE_NAMES.index(name)],
+        format_func=lambda name: (
+            tr(f"field_{name}", simple).split(" — ")[0]
+            if simple
+            else FEATURE_LABELS[FEATURE_NAMES.index(name)]
+        ),
     )
-    span = controls[1].slider("Sweep range (±%)", 10, 100, 100, step=10)
-    n_curves = controls[2].slider("Crops to plot", 2, 8, 4)
+    span = controls[1].slider(
+        "How far to change it (±%)" if simple else "Sweep range (±%)",
+        10, 100, 100, step=10,
+    )
+    # Capped at the validated categorical slot count; past this the guidance
+    # is to fold or facet, never to generate a ninth hue.
+    n_curves = controls[2].slider(
+        "How many crops to show" if simple else "Crops to plot", 2, 6, 4
+    )
 
     anchor = [prediction.raw_features[name] for name in FEATURE_NAMES]
     current = float(prediction.raw_features[feature])
@@ -587,29 +808,39 @@ def render_sensitivity_tab(state: Dict[str, object]) -> None:
     ranked = np.argsort(probabilities.max(axis=0))[::-1][:n_curves]
 
     figure, axes = plt.subplots(figsize=(11, 4.4))
-    palette = plt.cm.viridis(np.linspace(0.08, 0.86, len(ranked)))
+    # Crop identity is categorical: fixed slot order, never a generated or
+    # cycled hue, and never a value ramp (viridis would double-encode rank).
+    palette = series_palette(len(ranked))
     for colour, index in zip(palette, ranked):
+        crop = classes[int(index)]
+        # Emphasis: the current recommendation is the story, so it carries
+        # weight while the alternatives stay thin.
+        recommended = crop == prediction.crop
         axes.plot(
             grid,
             probabilities[:, index],
-            linewidth=2.0,
+            linewidth=2.8 if recommended else 1.8,
             color=colour,
-            label=classes[int(index)],
+            label=f"{crop} (now)" if recommended else crop,
+            zorder=3 if recommended else 2,
         )
     axes.axvline(
         current,
-        color=NEGATIVE,
-        linestyle="--",
+        color=MUTED,
         linewidth=1.4,
-        label=f"current = {current:.1f}",
+        label=f"your reading: {current:.0f}",
+        zorder=1,
     )
     index = FEATURE_NAMES.index(feature)
     axes.set_xlabel(f"{FEATURE_LABELS[index]} ({FEATURE_UNITS[index]})", fontsize=10)
-    axes.set_ylabel("Posterior probability", fontsize=10)
+    axes.set_ylabel(
+        "Chance this crop suits" if simple else "Posterior probability", fontsize=10
+    )
     axes.set_ylim(-0.02, 1.02)
-    axes.legend(frameon=False, fontsize=9, ncol=min(len(ranked) + 1, 5))
-    _style_axes(axes)
-    axes.grid(axis="y", color="#eef3f0", linewidth=0.8)
+    # A legend is always present for >= 2 series, so identity is never
+    # carried by colour alone.
+    axes.legend(frameon=False, fontsize=9, ncol=min(len(ranked) + 1, 4))
+    _style_axes(axes, grid_axis="y")
     figure.tight_layout()
     st.pyplot(figure, width="stretch")
     plt.close(figure)
@@ -622,24 +853,39 @@ def render_sensitivity_tab(state: Dict[str, object]) -> None:
         if argmax[i] != argmax[i - 1]
     ]
     summary = st.columns(3)
-    summary[0].metric(f"Current {feature}", f"{current:.1f}")
-    summary[1].metric("Sweep range", f"{grid.min():.1f} – {grid.max():.1f}")
-    summary[2].metric("Decision boundaries crossed", str(len(switches)))
+    summary[0].metric(
+        f"Your {feature} now" if simple else f"Current {feature}", f"{current:.1f}"
+    )
+    summary[1].metric(
+        "Range tried" if simple else "Sweep range",
+        f"{grid.min():.1f} – {grid.max():.1f}",
+    )
+    summary[2].metric(
+        "Times the best crop changes" if simple else "Decision boundaries crossed",
+        str(len(switches)),
+    )
 
     if switches:
-        st.markdown("**Recommendation switch points**")
+        st.markdown(f"**{tr('switch_heading', simple)}**")
+        columns = (
+            [f"If {feature} reaches", "Best crop changes from", "to"]
+            if simple
+            else [f"{feature} threshold", "From crop", "To crop"]
+        )
         st.dataframe(
-            pd.DataFrame(
-                switches, columns=[f"{feature} threshold", "From crop", "To crop"]
-            ).round(2),
+            pd.DataFrame(switches, columns=columns).round(2),
             hide_index=True,
             width="stretch",
         )
     else:
         st.success(
-            f"The {prediction.crop} recommendation is stable across the entire "
-            f"±{span}% sweep of {feature} — this factor is not the binding "
-            f"constraint for this plot."
+            f"Changing {feature} does not change the answer — {prediction.crop} "
+            f"stays the best crop across the whole range. Something else is "
+            f"deciding it."
+            if simple
+            else f"The {prediction.crop} recommendation is stable across the "
+            f"entire ±{span}% sweep of {feature} — this factor is not the "
+            f"binding constraint for this plot."
         )
 
 
@@ -654,13 +900,9 @@ def render_bulk_tab() -> None:
     laboratory CSV export and returns a recommendation per sample, with the
     rows needing human review surfaced first.
     """
-    st.markdown("#### Bulk advisory from a soil survey")
-    st.caption(
-        "Upload a laboratory export or survey sheet and receive a "
-        "recommendation for every sample. Column names are matched leniently — "
-        "`N`, `Nitrogen` and `avl_n` are all understood — and each row is "
-        "validated independently, so one bad reading never aborts the run."
-    )
+    simple = is_simple()
+    st.markdown(f"#### {tr('bulk_heading', simple)}")
+    st.caption(tr("bulk_intro", simple))
 
     processor = load_batch_processor()
     if processor is None:
@@ -744,10 +986,9 @@ def _render_bulk_result(result: BatchResult) -> None:
     metrics[2].metric("Distinct crops", summary["distinct_crops"])
     metrics[3].metric("Mean confidence", f"{summary['mean_confidence']:.1f}%")
     metrics[4].metric(
-        "Needs review",
+        tr("needs_review", is_simple()),
         f"{summary['low_confidence'] + summary['out_of_distribution']:,}",
-        help="Samples with confidence below 50% or inputs outside the "
-             "training distribution.",
+        help="Samples we are unsure about, or with unusual readings.",
     )
 
     with st.expander("How your column headers were interpreted"):
@@ -837,9 +1078,13 @@ def _render_bulk_result(result: BatchResult) -> None:
 # --------------------------------------------------------------------------- #
 def render_audit_tab() -> None:
     """Filterable view over the persisted recommendation ledger."""
-    st.markdown("#### Recommendation audit ledger")
+    simple = is_simple()
+    st.markdown(f"#### {tr('records_heading', simple)}")
     st.caption(
-        "Every committed recommendation is recorded with its inputs, its "
+        "Every piece of advice you saved is kept here, with the readings it "
+        "was based on."
+        if simple
+        else "Every committed recommendation is recorded with its inputs, its "
         "confidence, its dominant SHAP driver, and its explainer agreement "
         "index — the evidence trail behind advice acted on in the field."
     )
@@ -910,11 +1155,14 @@ def render_card_tab(state: Dict[str, object]) -> None:
         st.info("Generate a recommendation first to issue a soil health card.")
         return
 
-    st.markdown("#### Printable soil health card")
+    simple = is_simple()
+    st.markdown(f"#### {tr('card_heading', simple)}")
     st.caption(
-        "The card an extension officer hands to the cultivator. Every export "
-        "renders from one payload, so the figures cannot diverge between "
-        "formats."
+        "Print this and keep it, or show it to your agriculture officer."
+        if simple
+        else "The card an extension officer hands to the cultivator. Every "
+        "export renders from one payload, so the figures cannot diverge "
+        "between formats."
     )
 
     controls = st.columns([1.4, 2])
@@ -1003,21 +1251,27 @@ def render_card_tab(state: Dict[str, object]) -> None:
 # --------------------------------------------------------------------------- #
 def main() -> None:
     """Assemble the dashboard."""
-    st.markdown(
-        f"""<div class="gr-hero">
-              <h1>🌱 GREENROOT — Intelligent Precision Agriculture DSS</h1>
-              <p>Stacking ensemble meta-learning · multi-explainer consensus
-                 auditing · {REPORTED_CV_ACCURACY * 100:.2f}% stratified
-                 5-fold cross-validated accuracy across 22 crop classes</p>
-            </div>""",
-        unsafe_allow_html=True,
-    )
-
     recommender = load_recommender()
     if recommender is None:
         st.stop()
 
     inputs = render_sidebar()
+    simple = is_simple()
+
+    tagline = (
+        "Tells you which crop suits your land, and why"
+        if simple
+        else f"Stacking ensemble meta-learning · multi-explainer consensus "
+        f"auditing · {REPORTED_CV_ACCURACY * 100:.2f}% stratified 5-fold "
+        f"cross-validated accuracy across 22 crop classes"
+    )
+    st.markdown(
+        f"""<div class="gr-hero">
+              <h1>🌱 GREENROOT</h1>
+              <p>{tagline}</p>
+            </div>""",
+        unsafe_allow_html=True,
+    )
     ensure_database()
 
     if inputs["run"]:
@@ -1060,12 +1314,12 @@ def main() -> None:
 
     tabs = st.tabs(
         [
-            "🎯 Precision Recommendation",
-            "🔍 Explainable AI Consensus",
-            "🧭 What-If Sensitivity",
-            "📦 Bulk Advisory",
-            "📋 Audit Trail & Governance",
-            "🧾 Farmer Soil Health Card",
+            tr("tab_recommend", simple),
+            tr("tab_why", simple),
+            tr("tab_whatif", simple),
+            tr("tab_bulk", simple),
+            tr("tab_records", simple),
+            tr("tab_card", simple),
         ]
     )
     with tabs[0]:
@@ -1083,11 +1337,13 @@ def main() -> None:
 
     st.markdown("---")
     st.caption(
-        f"GREENROOT · stacking ensemble (Random Forest + AdaBoost + k-NN → "
-        f"logistic-regression meta-learner) · {len(recommender.class_names)} "
-        f"crop classes · Jaccard consensus at k={CONSENSUS_TOP_K}. "
-        f"Advisory output only — corroborate with a certified laboratory soil "
-        f"test before committing a season."
+        tr("disclaimer", simple)
+        if simple
+        else f"GREENROOT · stacking ensemble (Random Forest + AdaBoost + k-NN "
+        f"→ logistic-regression meta-learner) · "
+        f"{len(recommender.class_names)} crop classes · Jaccard consensus at "
+        f"k={CONSENSUS_TOP_K}. Advisory output only — corroborate with a "
+        f"certified laboratory soil test before committing a season."
     )
 
 

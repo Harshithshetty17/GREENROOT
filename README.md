@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![scikit--learn](https://img.shields.io/badge/scikit--learn-1.9.0-orange)
-![Tests](https://img.shields.io/badge/tests-229%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-266%20passed-brightgreen)
 ![CV Accuracy](https://img.shields.io/badge/5--fold%20CV-99.41%25-brightgreen)
 
 A decision support system that recommends one of 22 crops from seven agronomic
@@ -66,6 +66,14 @@ under measured shift its mean confidence falls from 0.96 to 0.41 rather than
 staying spuriously high, and the Z-score monitor flags 100% of shifted readings.
 
 ---
+
+**Written for the person who uses it.** The dashboard opens in plain
+language — "Nitrogen (N) — for green leaves", "16 kg per acre (about half a bag
+of 50 kg)", "Both checks agree" — because its primary user is a cultivator, not
+an examiner. A single toggle switches every string to the technical register
+used in this document, so nothing is dumbed down, only re-worded. Fertiliser is
+quoted in bags and acres alongside kg/ha, since that is what a farmer buys and
+works.
 
 **What it does, concretely.** One cultivator at a time through the interactive
 dashboard, or a whole village at once through bulk advisory; every
@@ -603,6 +611,7 @@ GREENROOT/
 │
 ├── src/
 │   ├── core/config.py              Paths, feature contract, safety bounds
+│   ├── core/theme.py               Design tokens; CVD-validated chart palette
 │   ├── database/db_manager.py      Thread-safe SQLite, WAL, migrations
 │   ├── services/
 │   │   ├── weather_service.py      OWM client: timeout, cache, offline mock
@@ -614,13 +623,15 @@ GREENROOT/
 │   └── utils/
 │       ├── agronomy_advisory.py    Hydrology, nutrition, pH, thermal heuristics
 │       ├── localisation.py         Kannada crop names and card labels
+│       ├── plain_language.py       Farmer register, bag/acre units
 │       └── report_generator.py     PDF / HTML / Markdown / text health card
 │
-└── tests/                      229 tests, 1 environment-conditional skip
+└── tests/                      266 tests, 1 environment-conditional skip
     ├── test_models.py              Validation, calibration, sweep, Jaccard
     ├── test_services.py            Mocked transports, district resolution
     ├── test_database.py            CRUD, migration, rollback, concurrency
     ├── test_batch.py               Column resolution, row isolation, Kannada
+    ├── test_presentation.py        Palette gates, unit conversion, jargon
     └── test_validation_statistics.py
                                     Corrected t-test, ECE, Brier score
 ```
@@ -660,9 +671,10 @@ pytest -v
 tests/test_batch.py                 ......................  54 passed
 tests/test_database.py              ......................  44 passed
 tests/test_models.py                ......................  72 passed
+tests/test_presentation.py          ......................  37 passed
 tests/test_services.py              ......................  42 passed, 1 skipped
 tests/test_validation_statistics.py ......................  17 passed
-============== 229 passed, 1 skipped in 4.86s ==============
+============== 266 passed, 1 skipped in 4.88s ==============
 ```
 
 Coverage of note:
@@ -691,6 +703,12 @@ Coverage of note:
   verified to contain actual Kannada codepoints (guarding against an English
   string left in the translation column), and every bilingual string is
   asserted to still contain its English term.
+- **Presentation** — the categorical palette is asserted to refuse a ninth
+  series rather than generate one (a generated hue is indistinguishable under
+  colour-vision deficiency); hectare→acre conversion is checked against its
+  closed form, because a wrong conversion here becomes a wrong fertiliser dose
+  in a real field; and every farmer-facing string is scanned for jargon
+  ("posterior", "attribution", "surrogate") that must not appear in it.
 - **Statistical machinery** — the corrected resampled *t*-test is checked
   against its closed form and, critically, against the invariant that it is
   *more conservative* than the naive paired test; ECE and Brier score are
@@ -747,6 +765,16 @@ demonstrable, but it is a finding, not a design choice.
 Karnataka zones (Udupi, Dakshina Kannada, Mysuru, Dharwad, Bengaluru Rural) are
 served by a curated agro-climatic table, flagged in the UI as `fallback` rather
 than survey-backed.
+
+**Chart colour is assigned by data job, not taste.** Crop identity uses a
+fixed eight-slot categorical order whose worst adjacent pair scores ΔE 9.1 under
+simulated protanopia and 19.6 under normal vision, verified with a validator
+rather than by eye; signed quantities (Z-scores, SHAP/LIME attributions) use a
+diverging warm/cool pair with a neutral zero, because "above average nitrogen"
+is neither good nor bad; and crop counts use one hue for one series rather than
+a value ramp. Orderings led by the brand green were tested and rejected — they
+pass in light mode but fall into the warning band in dark — so the brand green
+carries chrome and single-series marks instead.
 
 **Kannada translations are unreviewed.** The bilingual card is a prototype
 mapping prepared for this project and has **not** been checked by a native

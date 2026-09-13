@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![scikit--learn](https://img.shields.io/badge/scikit--learn-1.9.0-orange)
-![Tests](https://img.shields.io/badge/tests-158%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-175%20passed-brightgreen)
 ![CV Accuracy](https://img.shields.io/badge/5--fold%20CV-99.41%25-brightgreen)
 
 A decision support system that recommends one of 22 crops from seven agronomic
@@ -22,6 +22,8 @@ evidence.
 2. [System Architecture](#2-system-architecture)
 3. [Mathematical Formulation](#3-mathematical-formulation)
 4. [Evaluation Scorecard](#4-evaluation-scorecard)
+   - [4.5 Architectural Validation](#45-architectural-validation--does-stacking-earn-its-complexity)
+   - [4.6 What the Stacking Layer Buys](#46-what-the-stacking-layer-actually-buys)
 5. [Quick Start](#5-quick-start)
 6. [Dashboard](#6-dashboard)
 7. [Repository Layout](#7-repository-layout)
@@ -48,6 +50,14 @@ nothing in its output says whether that attribution is stable. GREENROOT runs
 TreeSHAP *and* LIME over every instance and reports their Jaccard agreement, so
 a reader can distinguish a robust explanation from one that is an artefact of
 the method.
+
+**An architecture must be shown to earn its complexity.** A title claiming
+"stacking ensemble meta-learning" is a claim, not a description, and it is
+falsifiable. GREENROOT tests it — and §4.5 reports that on accuracy the claim
+**fails**: the ensemble is statistically indistinguishable from a plain Random
+Forest. §4.6 then establishes what the stacking layer does buy, which turns
+out to be robustness to base-learner failure and an order-of-magnitude better
+posterior. That is the honest version of the contribution.
 
 **Benchmark accuracy is not field accuracy.** Real district soil surveys carry
 severe covariate shift — the Karnataka NFSM corpus averages 210 kg/ha available
@@ -351,6 +361,166 @@ The 13.3% that diverge are not a defect — they are the system correctly
 identifying instances near a decision boundary, where the dashboard downgrades
 the recommendation to *provisional* and asks for a field soil test.
 
+
+### 4.5 Architectural Validation — does stacking earn its complexity?
+
+`evaluate_system.py` measures the *deployed artefact*. `validate_architecture.py`
+asks the prior question, re-fitting every architecture from scratch under a
+leak-free pipeline: **is the stacking layer justified at all?**
+
+Repeated stratified 5-fold cross-validation, 15 measurements per model,
+identical folds throughout, scaler re-fitted inside each fold.
+
+| Architecture | Accuracy | s.d. | Fit time |
+|---|---:|---:|---:|
+| Random Forest (base) | 99.52% | 0.26 | 4.5s |
+| **Stacking Ensemble (deployed)** | **99.38%** | 0.35 | 32.7s |
+| Stacking without AdaBoost | 99.38% | 0.35 | 29.9s |
+| Soft Voting (same base learners) | 99.05% | 0.41 | 8.1s |
+| k-NN, k=5 (base) | 97.38% | 0.60 | 0.1s |
+| Logistic Regression (meta alone) | 97.12% | 0.56 | 0.8s |
+| AdaBoost (base) | 25.35% | 10.13 | 4.0s |
+
+> ### The stacking layer does not improve accuracy on this corpus.
+>
+> Against a plain Random Forest the deployed ensemble scores
+> **-0.136 pp** at corrected *p* = 0.444
+> (W/T/L 3/6/6) — statistically
+> indistinguishable, at roughly 7×
+> the fitting cost. This is reported here rather than buried, because it is what
+> a **saturated benchmark** looks like: §4.6 shows the learning curve has
+> plateaued and Random Forest alone already reaches the ceiling. Accuracy has no
+> headroom left in which any architecture could distinguish itself.
+>
+> The architecture's justification therefore has to come from somewhere else —
+> and it does.
+
+Significance is assessed with the **Nadeau–Bengio corrected resampled
+*t*-test**. Cross-validation folds share training data, so the uncorrected
+paired *t*-test violates its own independence assumption and returns
+optimistically small *p*-values; the correction inflates the variance estimate
+by the train/test overlap ratio.
+
+| Comparison | Δ accuracy | W/T/L | corrected *p* | naive *p* | Significant |
+|---|---:|---|---:|---:|---|
+| vs Random Forest (base) | -0.136 pp | 3/6/6 | 0.444 | 0.108 | no |
+| vs AdaBoost (base) | +74.030 pp | 15/0/0 | 0 | 0 | **yes** |
+| vs k-NN, k=5 (base) | +2.000 pp | 15/0/0 | 5.76e-05 | 1e-08 | **yes** |
+| vs Logistic Regression (meta alone) | +2.258 pp | 15/0/0 | 1.73e-06 | 0 | **yes** |
+| vs Soft Voting (same base learners) | +0.333 pp | 11/3/1 | 0.0954 | 0.00161 | no |
+| vs Stacking without AdaBoost | +0.000 pp | 0/15/0 | 1 | nan | no |
+
+Note how much smaller every naive *p*-value is. Citing those would overstate
+the evidence.
+
+**Preprocessing-leakage audit.** The original `train.py` fits the scaler on the
+whole corpus *before* cross-validating, so test-fold statistics inform the
+transform. Quantified over identical folds, that optimism is
+**+0.000 pp** — the documented 99.41%
+reproduces at 99.41% under the original
+protocol and 99.41% under a leak-free
+pipeline. The informal protocol turned out not to have inflated the headline
+figure, but the figure is now verified rather than assumed.
+
+### 4.6 What the stacking layer actually buys
+
+**Finding 1 — the meta-learner suppresses a failed base learner.** AdaBoost
+scores 25.35% standalone: 50 decision stumps cannot
+separate 22 classes. It nonetheless sits inside the deployed ensemble as one
+base learner in three. Partitioning the meta-learner's 66-column coefficient
+matrix into its three 22-column blocks:
+
+| Base learner | Standalone accuracy | Share of weight mass |
+|---|---:|---:|
+| `rf` | 99.52% | 50.88% |
+| `knn` | 97.38% | 48.80% |
+| `adaboost` | 25.35% | 0.32% |
+
+The meta-learner assigns AdaBoost **0.32%** of total weight mass.
+Deleting it from the ensemble changes cross-validated accuracy by less than
+1e-9 across all 15 folds. The suppression is total.
+
+**Finding 2 — that suppression is worth 11× on posterior quality.**
+Soft voting over the *same* three base learners is the control that isolates
+the combination rule — fixed averaging versus a learned combiner. On accuracy
+the two are close and the gap does not reach significance
+(+0.33 pp, *p* = 0.0954).
+On the posterior they are not close at all:
+
+| Metric | Soft voting | Stacking | Random Forest |
+|---|---:|---:|---:|
+| Expected Calibration Error | 0.3378 | **0.0428** | 0.0447 |
+| Brier score | 0.1366 | **0.0125** | 0.0164 |
+| Log-loss | 0.4376 | 0.0602 | **0.0569** |
+| Mean confidence | 65.3% | 95.1% | 95.1% |
+| Accuracy | 99.05% | 99.41% | 99.59% |
+| Over-confidence | -33.8 pp | **-4.3 pp** | -4.5 pp |
+
+Voting is right 99.0% of the time while reporting
+65.3% confidence — under-confident by
+33.8 percentage points, because averaging drags
+every posterior toward AdaBoost's near-uniform output. Its argmax survives; its
+probabilities do not.
+
+**Why this matters operationally.** In GREENROOT the posterior is not
+incidental. It is displayed to the farmer as a confidence percentage and it
+gates the provisional-advisory threshold at 50%. A voting ensemble here would
+flag almost every recommendation as provisional while being right 99% of the
+time — the advisory would be useless. Brier score and log-loss are *strictly
+proper* scoring rules: minimised only by honest reporting of uncertainty. The
+stacking layer buys a posterior that means what it says, while carrying a base
+learner that has failed outright.
+
+**Honest scorecard.**
+
+| Claim | Verdict |
+|---|---|
+| Stacking beats Random Forest on accuracy | **No** — indistinguishable, *p* = 0.444. The benchmark is saturated. |
+| Stacking beats soft voting on accuracy | Not significantly — *p* = 0.0954. |
+| Stacking beats soft voting on posterior quality | **Yes, decisively** — 11× better Brier score. |
+| Stacking tolerates a failed base learner | **Yes** — 0.32% weight mass to a 25%-accurate learner. |
+
+### 4.7 Learning Curve
+
+| Training samples | Per class | Train acc. | Validation acc. | Gap |
+|---:|---:|---:|---:|---:|
+| 352 | 16 | 99.94% | 98.27% | 1.67 pp |
+| 704 | 32 | 100.00% | 98.95% | 1.05 pp |
+| 1056 | 48 | 100.00% | 99.09% | 0.91 pp |
+| 1408 | 64 | 99.96% | 99.27% | 0.68 pp |
+| 1760 | 80 | 99.89% | 99.32% | 0.57 pp |
+
+Validation accuracy moves +0.045 pp over the final size increment and
+the generalisation gap closes monotonically to
+0.57 pp. **The curve has plateaued.**
+More exemplars of the same kind would not improve the model; broader
+agro-climatic coverage would. This is the direct evidence that the benchmark is
+saturated, and therefore the reason §4.5 finds no architecture separable on
+accuracy.
+
+### 4.8 Where the Explainers Disagree
+
+A single mean Jaccard index hides whether divergence is spread evenly or
+concentrated. It is concentrated:
+
+| Crop | Mean J | Min J | High-fidelity rate |
+|---|---:|---:|---:|
+| mango | 0.38 | 0.20 | 60% |
+| rice | 0.44 | 0.20 | 80% |
+| pigeonpeas | 0.48 | 0.20 | 60% |
+| mothbeans | 0.58 | 0.20 | 60% |
+| lentil | 0.60 | 0.50 | 100% |
+| kidneybeans | 0.60 | 0.50 | 100% |
+| … | … | … | … |
+| apple, coffee, muskmelon, watermelon | 1.00 | 1.00 | 100% |
+
+Three crops — **mango, rice, pigeonpeas** — fall below the
+consensus threshold on average, while four reach perfect agreement on every
+instance audited. Divergence is a property of *where in the feature space* a
+crop sits, not a uniform noise floor. The dashboard marks recommendations in
+the divergent regions provisional.
+
+
 ---
 
 ## 5. Quick Start
@@ -372,7 +542,8 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
 streamlit run app.py               # dashboard  → http://localhost:8501
-python evaluate_system.py          # benchmarks → reports/
+python evaluate_system.py          # system benchmarks  → reports/
+python validate_architecture.py    # architecture audit → reports/  (~3 min)
 pytest -v                          # verification suite
 ```
 
@@ -406,6 +577,8 @@ failure degrades to a documented mock reading.
 GREENROOT/
 ├── app.py                      Streamlit presentation layer (5 tabs)
 ├── evaluate_system.py          Formal empirical validation suite
+├── validate_architecture.py    Architectural audit: ablation, significance,
+│                               leakage, learning curve, calibration
 ├── train.py                    Original training script (see warning below)
 ├── audit_xai.py                Original XAI diagnostic script
 ├── run.bat                     One-click Windows launcher
@@ -431,10 +604,12 @@ GREENROOT/
 │       ├── agronomy_advisory.py    Hydrology, nutrition, pH, thermal heuristics
 │       └── report_generator.py     Text / Markdown / HTML soil health card
 │
-└── tests/                      158 tests, 1 environment-conditional skip
+└── tests/                      175 tests, 1 environment-conditional skip
     ├── test_models.py              Validation, calibration, sweep, Jaccard
     ├── test_services.py            Mocked transports, district resolution
-    └── test_database.py            CRUD, migration, rollback, concurrency
+    ├── test_database.py            CRUD, migration, rollback, concurrency
+    └── test_validation_statistics.py
+                                    Corrected t-test, ECE, Brier score
 ```
 
 > ⚠️ **`train.py` overwrites the artefacts in `models/`.** The pickles shipped
@@ -469,10 +644,11 @@ pytest -v
 ```
 
 ```text
-tests/test_database.py  ....................................  44 passed
-tests/test_models.py    ....................................  72 passed
-tests/test_services.py  ....................................  42 passed, 1 skipped
-=================== 158 passed, 1 skipped in 4.46s ===================
+tests/test_database.py              ......................  44 passed
+tests/test_models.py                ......................  72 passed
+tests/test_services.py              ......................  42 passed, 1 skipped
+tests/test_validation_statistics.py ......................  17 passed
+============== 175 passed, 1 skipped in 4.43s ==============
 ```
 
 Coverage of note:
@@ -493,6 +669,11 @@ Coverage of note:
   are stored and matched as literal data; the table survives.
 - **Concurrency** — 12 concurrent writers produce 12 unique identifiers, each
   thread receives a distinct connection, and reads interleave with writes.
+- **Statistical machinery** — the corrected resampled *t*-test is checked
+  against its closed form and, critically, against the invariant that it is
+  *more conservative* than the naive paired test; ECE and Brier score are
+  checked against known closed-form values including the proper-scoring-rule
+  property that honest hedging must beat confident error.
 - **Service degradation** — timeout, connection error, malformed JSON,
   application-level error, and unexpected schema each degrade to a mock with a
   stated reason rather than raising.
@@ -524,6 +705,21 @@ study against paired soil tests, which this corpus does not contain.
 surrogate, not the stacking ensemble itself. Surrogate fidelity is 99.55%, and
 the dashboard warns explicitly on the instances where the surrogate and the
 deployed model disagree.
+
+**The benchmark is saturated, and that bounds what can be concluded.** A
+plain Random Forest reaches the ceiling, the learning curve has plateaued, and
+no architecture is separable on accuracy (§4.5, §4.7). The stacking layer is
+defended here on posterior quality and fault tolerance, not accuracy. Whether
+it would also win on accuracy given genuine headroom is untested by this
+corpus, and the honest answer is that this dataset cannot settle it — a
+harder, noisier, less balanced corpus would be needed.
+
+**AdaBoost is dead weight in the ensemble.** It scores 25.35% standalone and
+receives 0.32% of the meta-learner's weight mass. It is retained because the
+shipped artefact contains it and this work does not retrain that artefact; a
+clean reimplementation would either drop it or replace the stumps with deeper
+base estimators. Its presence is what makes the fault-tolerance result
+demonstrable, but it is a finding, not a design choice.
 
 **Geographic scope.** The NFSM survey covers five Chitradurga taluks. The other
 Karnataka zones (Udupi, Dakshina Kannada, Mysuru, Dharwad, Bengaluru Rural) are

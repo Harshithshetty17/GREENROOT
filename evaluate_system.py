@@ -73,6 +73,7 @@ from src.core.config import (
     CLASSIFICATION_REPORT_PATH,
     CONFUSION_MATRIX_PATH,
     EVALUATION_SUMMARY_PATH,
+    REPORTS_DIR,
     FEATURE_NAMES,
     FIGURE_DPI,
     LATENCY_REPORT_PATH,
@@ -92,6 +93,9 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s | %(levelname)-7s | %(message)s"
 )
 logger = logging.getLogger("greenroot.evaluate")
+
+#: Per-crop explainer-consensus breakdown.
+CONSENSUS_BY_CROP_PATH = REPORTS_DIR / "consensus_by_crop.csv"
 
 _RULE = "=" * 78
 
@@ -443,7 +447,66 @@ def evaluate_consensus(sample_size: int = 30) -> Optional[Dict[str, float]]:
     for value, count in distribution.items():
         bar = "#" * int(count / max(distribution.max(), 1) * 30)
         print(f"    J = {value:.2f} | {count:3d} {bar}")
+
+    _consensus_by_crop(engine, frame)
     return metrics
+
+
+def _consensus_by_crop(engine, frame: pd.DataFrame, per_crop: int = 5) -> None:
+    """Locate which crops the two explainers disagree about.
+
+    A single mean Jaccard index hides whether divergence is spread evenly or
+    concentrated in particular crops. If it concentrates, those crops occupy
+    a region of the feature space where the decision boundary is genuinely
+    ambiguous — which is actionable, because the dashboard can flag them.
+    """
+    print(f"\n  Per-crop consensus ({per_crop} instances per crop):")
+
+    rng = np.random.default_rng(RANDOM_STATE)
+    rows: List[Dict[str, float]] = []
+
+    for crop, block in frame.groupby("label"):
+        matrix = block[FEATURE_NAMES].to_numpy(dtype=float)
+        take = min(per_crop, len(matrix))
+        chosen = matrix[rng.choice(len(matrix), size=take, replace=False)]
+        reports = [engine.explain(row) for row in chosen]
+        scores = np.array([r.jaccard for r in reports])
+        rows.append(
+            {
+                "crop": str(crop),
+                "instances": len(scores),
+                "mean_jaccard": float(scores.mean()),
+                "min_jaccard": float(scores.min()),
+                "high_fidelity_rate": float(np.mean([r.is_high_fidelity for r in reports])),
+            }
+        )
+
+    table = pd.DataFrame(rows).sort_values("mean_jaccard")
+    table.round(4).to_csv(CONSENSUS_BY_CROP_PATH, index=False)
+
+    print(f"    {'crop':<14} {'mean J':>7} {'min J':>7} {'high-fidelity':>14}")
+    for _, row in table.iterrows():
+        flag = "  <-- divergent" if row["mean_jaccard"] < 0.5 else ""
+        print(
+            f"    {row['crop']:<14} {row['mean_jaccard']:7.2f} "
+            f"{row['min_jaccard']:7.2f} {row['high_fidelity_rate'] * 100:13.0f}%{flag}"
+        )
+
+    divergent = table[table["mean_jaccard"] < 0.5]
+    if len(divergent):
+        print(
+            f"\n    {len(divergent)} crop(s) fall below the consensus threshold on "
+            f"average: {', '.join(divergent['crop'])}."
+        )
+        print(
+            "    These occupy regions where the two explainers disagree about "
+            "which\n    factors drive the decision — the dashboard marks such "
+            "recommendations\n    provisional."
+        )
+    else:
+        print("\n    No crop falls below the consensus threshold on average.")
+
+    print(f"\n  [+] Per-crop consensus -> {CONSENSUS_BY_CROP_PATH}")
 
 
 # --------------------------------------------------------------------------- #

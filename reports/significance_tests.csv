@@ -1,0 +1,7 @@
+comparison,mean_difference,wins,ties,losses,corrected_t,corrected_p,naive_p,cohens_d,significant_at_0.05
+Stacking Ensemble (deployed) vs Random Forest (base),-0.00136364,3,6,6,-0.78848622,0.44355976,0.10773619,-0.44370598,False
+Stacking Ensemble (deployed) vs AdaBoost (base),0.74030303,15,0,0,12.99894226,0.0,0.0,7.31491341,True
+"Stacking Ensemble (deployed) vs k-NN, k=5 (base)",0.02,15,0,0,5.67250256,5.758e-05,1e-08,3.1920955,True
+Stacking Ensemble (deployed) vs Logistic Regression (meta alone),0.02257576,15,0,0,7.84210526,1.73e-06,0.0,4.41299914,True
+Stacking Ensemble (deployed) vs Soft Voting (same base learners),0.00333333,11,3,1,1.78843213,0.09536035,0.00160871,1.00640698,False
+Stacking Ensemble (deployed) vs Stacking without AdaBoost,0.0,0,15,0,0.0,1.0,,inf,False

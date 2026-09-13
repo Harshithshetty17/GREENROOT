@@ -1,6 +1,6 @@
 # GREENROOT — System Evaluation Summary
 
-_Generated 2026-09-13 15:24:49_
+_Generated 2026-09-13 16:13:43_
 
 ## 1. Classification Performance
 
@@ -25,13 +25,13 @@ Stratified 20% hold-out of `Crop_recommendation.csv` (2,200 samples, 22 classes)
 
 | Statistic | Latency (ms) |
 |---|---:|
-| Mean | 16.406 |
-| P50 | 16.194 |
-| P95 | 17.029 |
-| P99 | 21.156 |
-| Max | 27.546 |
+| Mean | 15.772 |
+| P50 | 15.702 |
+| P95 | 16.499 |
+| P99 | 17.024 |
+| Max | 17.162 |
 
-Sustained throughput: **61 inferences/s** single-threaded.
+Sustained throughput: **63 inferences/s** single-threaded.
 
 ## 3. Out-of-Distribution Robustness
 
@@ -58,7 +58,7 @@ TreeSHAP versus LIME top-3 driver agreement, Jaccard index.
 | Median Jaccard index | 0.5000 |
 | Perfect agreement (J = 1.0) | 46.7% |
 | High fidelity (J >= 0.5) | 86.7% |
-| Mean explanation latency | 119.3 ms |
+| Mean explanation latency | 123.0 ms |
 
 ## Artefacts
 

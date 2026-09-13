@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![scikit--learn](https://img.shields.io/badge/scikit--learn-1.9.0-orange)
-![Tests](https://img.shields.io/badge/tests-175%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-229%20passed-brightgreen)
 ![CV Accuracy](https://img.shields.io/badge/5--fold%20CV-99.41%25-brightgreen)
 
 A decision support system that recommends one of 22 crops from seven agronomic
@@ -64,6 +64,15 @@ severe covariate shift — the Karnataka NFSM corpus averages 210 kg/ha availabl
 nitrogen against a benchmark mean of 50. GREENROOT monitors this explicitly:
 under measured shift its mean confidence falls from 0.96 to 0.41 rather than
 staying spuriously high, and the Z-score monitor flags 100% of shifted readings.
+
+---
+
+**What it does, concretely.** One cultivator at a time through the interactive
+dashboard, or a whole village at once through bulk advisory; every
+recommendation carries ranked alternatives, a fertiliser prescription in
+commercial product quantities, a two-explainer stability audit, and a printable
+Soil Health Card in PDF or bilingual Kannada/English. Committed recommendations
+land in an immutable SQLite ledger with the evidence that produced them.
 
 ---
 
@@ -566,8 +575,9 @@ failure degrades to a documented mock reading.
 | 🎯 **Precision Recommendation** | Primary crop card with posterior confidence, top-3 ranked alternatives, agronomic advisory, fertiliser prescription, Z-score deviation profile, and one-click persistence to the audit ledger. |
 | 🔍 **Explainable AI Consensus** | Live Jaccard index with its mathematical definition, side-by-side TreeSHAP and LIME attribution plots, and a dynamic fidelity badge. |
 | 🧭 **What-If Sensitivity** | Perturbs one feature across a ±100% sweep holding the other six constant, plotting multi-class posterior curves with the current-value marker and tabulating the exact thresholds at which the recommendation flips. |
+| 📦 **Bulk Advisory** | Upload a whole soil survey (CSV or Excel) and receive a recommendation per sample. Column names are matched leniently, each row is validated independently so one bad reading never aborts the run, and samples needing human review are surfaced first. |
 | 📋 **Audit Trail & Governance** | Date-filtered view of the SQLite ledger with summary statistics, per-crop distribution, and a CSV export. |
-| 🧾 **Farmer Soil Health Card** | Print-ready card covering tested chemistry, microclimate, primary and secondary crop choices, and fertiliser management, exportable as HTML, Markdown, or plain text. |
+| 🧾 **Farmer Soil Health Card** | Print-ready card covering tested chemistry, microclimate, primary and secondary crop choices, and fertiliser management. Exports as **PDF**, HTML, Markdown or plain text, and renders **bilingually in Kannada** alongside English. |
 
 ---
 
@@ -599,15 +609,18 @@ GREENROOT/
 │   │   └── soil_service.py         NFSM baselines with 4-tier resolution
 │   ├── models/
 │   │   ├── inference.py            CropRecommender: validate → scale → rank
+│   │   ├── batch.py                Bulk advisory over a whole soil survey
 │   │   └── xai_engine.py           ExplainerConsensus: SHAP + LIME + Jaccard
 │   └── utils/
 │       ├── agronomy_advisory.py    Hydrology, nutrition, pH, thermal heuristics
-│       └── report_generator.py     Text / Markdown / HTML soil health card
+│       ├── localisation.py         Kannada crop names and card labels
+│       └── report_generator.py     PDF / HTML / Markdown / text health card
 │
-└── tests/                      175 tests, 1 environment-conditional skip
+└── tests/                      229 tests, 1 environment-conditional skip
     ├── test_models.py              Validation, calibration, sweep, Jaccard
     ├── test_services.py            Mocked transports, district resolution
     ├── test_database.py            CRUD, migration, rollback, concurrency
+    ├── test_batch.py               Column resolution, row isolation, Kannada
     └── test_validation_statistics.py
                                     Corrected t-test, ECE, Brier score
 ```
@@ -644,11 +657,12 @@ pytest -v
 ```
 
 ```text
+tests/test_batch.py                 ......................  54 passed
 tests/test_database.py              ......................  44 passed
 tests/test_models.py                ......................  72 passed
 tests/test_services.py              ......................  42 passed, 1 skipped
 tests/test_validation_statistics.py ......................  17 passed
-============== 175 passed, 1 skipped in 4.43s ==============
+============== 229 passed, 1 skipped in 4.86s ==============
 ```
 
 Coverage of note:
@@ -669,6 +683,14 @@ Coverage of note:
   are stored and matched as literal data; the table survives.
 - **Concurrency** — 12 concurrent writers produce 12 unique identifiers, each
   thread receives a distinct connection, and reads interleave with writes.
+- **Bulk processing** — header aliases (`Nitrogen`, `avl_n`, `N (kg/ha)`) all
+  resolve to the same feature; a single inadmissible row is isolated with its
+  1-based source position and reason rather than aborting the survey; and a
+  batch of one is asserted to agree exactly with the interactive path.
+- **Localisation** — every one of the 22 classes has a Kannada name, each is
+  verified to contain actual Kannada codepoints (guarding against an English
+  string left in the translation column), and every bilingual string is
+  asserted to still contain its English term.
 - **Statistical machinery** — the corrected resampled *t*-test is checked
   against its closed form and, critically, against the invariant that it is
   *more conservative* than the naive paired test; ECE and Brier score are
@@ -725,6 +747,20 @@ demonstrable, but it is a finding, not a design choice.
 Karnataka zones (Udupi, Dakshina Kannada, Mysuru, Dharwad, Bengaluru Rural) are
 served by a curated agro-climatic table, flagged in the UI as `fallback` rather
 than survey-backed.
+
+**Kannada translations are unreviewed.** The bilingual card is a prototype
+mapping prepared for this project and has **not** been checked by a native
+Kannada speaker or an agricultural extension authority. The card is therefore
+deliberately bilingual rather than Kannada-only — the English remains beside
+every translated term, so a mistranslation cannot silently change the advice —
+and each entry carries an ISO 15919 transliteration in
+`src/utils/localisation.py` to make review straightforward. Native review is
+required before any field deployment.
+
+**The PDF export is English-only.** fpdf2's core fonts are Latin-1, and this
+project does not bundle a Kannada typeface (a licensed Noto Sans Kannada TTF
+would need to be added to embed one). The HTML export carries the bilingual
+card and prints correctly from any browser.
 
 **Advisory status.** Output is decision *support*, not prescription. Every card
 and every export carries the instruction to corroborate with a certified

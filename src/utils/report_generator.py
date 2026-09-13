@@ -16,12 +16,19 @@ from __future__ import annotations
 import html
 import logging
 from dataclasses import dataclass, field
+from dataclasses import replace as dataclasses_replace
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from src.core.config import FEATURE_LABELS, FEATURE_NAMES, FEATURE_UNITS
 from src.utils.agronomy_advisory import AdvisoryReport
+from src.utils.localisation import (
+    bilingual_crop,
+    bilingual_feature,
+    bilingual_label,
+    label as tr_label,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +67,10 @@ class SoilHealthCard:
         Top TreeSHAP drivers behind the recommendation.
     generated_at:
         ISO-8601 timestamp; defaults to render time.
+    bilingual:
+        Render farmer-facing labels and crop names in Kannada alongside
+        English. The English text always remains, so a mistranslation cannot
+        silently change the advice.
     """
 
     district: str
@@ -72,11 +83,20 @@ class SoilHealthCard:
     consensus_verdict: str = ""
     shap_drivers: Sequence[str] = field(default_factory=tuple)
     generated_at: str = ""
+    bilingual: bool = False
 
     @property
     def timestamp(self) -> str:
         """Render timestamp, defaulting to now."""
         return self.generated_at or datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    def text(self, key: str) -> str:
+        """Return a card label, bilingual when the card is in bilingual mode."""
+        return bilingual_label(key) if self.bilingual else tr_label(key)
+
+    def crop_name(self, crop: str) -> str:
+        """Return a crop name, bilingual when the card is in bilingual mode."""
+        return bilingual_crop(crop) if self.bilingual else crop.capitalize()
 
     def _rows(self, keys: Sequence[str]) -> List[Tuple[str, str, str]]:
         """Return ``(label, formatted value, unit)`` rows for ``keys``."""
@@ -85,6 +105,8 @@ class SoilHealthCard:
             if key not in self.features:
                 continue
             label, unit = _FEATURE_META.get(key, (key, ""))
+            if self.bilingual:
+                label = bilingual_feature(key)
             value = float(self.features[key])
             rows.append((label, f"{value:.1f}" if key == "ph" else f"{value:.0f}", unit))
         return rows
@@ -281,7 +303,8 @@ _HTML_STYLE = """
         --bg:#ffffff; --panel:#f4f8f5; }
 * { box-sizing: border-box; }
 body { margin:0; padding:24px; background:var(--bg); color:var(--ink);
-       font-family:"Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+       font-family:"Segoe UI", Roboto, "Noto Sans Kannada", "Tunga",
+                   "Nirmala UI", Helvetica, Arial, sans-serif;
        font-size:14px; line-height:1.55; }
 .card { max-width:820px; margin:0 auto; border:1px solid var(--line);
         border-radius:10px; overflow:hidden; }
@@ -336,7 +359,7 @@ def _html_rows(rows: Sequence[Tuple[str, str, str]]) -> str:
 def render_html(card: SoilHealthCard) -> str:
     """Render the card as a self-contained, print-ready HTML document."""
     alternatives = "\n".join(
-        f"<tr><td class='num'>{rank}</td><td>{_esc(crop.capitalize())}</td>"
+        f"<tr><td class='num'>{rank}</td><td>{_esc(card.crop_name(crop))}</td>"
         f"<td class='num'>{pct:.2f}%</td></tr>"
         for rank, (crop, pct) in enumerate(card.alternatives, start=1)
     )
@@ -370,7 +393,7 @@ def render_html(card: SoilHealthCard) -> str:
         )
         advisory_section = f"""
     <section>
-      <h2>Agronomic Advisory</h2>
+      <h2>{_esc(card.text("advisory"))}</h2>
       <ul class='advisory'>
 {items}
       </ul>
@@ -384,7 +407,7 @@ def render_html(card: SoilHealthCard) -> str:
         )
         fertiliser_section = f"""
     <section>
-      <h2>Fertiliser Prescription (per hectare)</h2>
+      <h2>{_esc(card.text("fertiliser"))}</h2>
       <table>
         <tr><th>Product</th><th class='num'>Quantity (kg)</th></tr>
 {rows}
@@ -396,55 +419,287 @@ def render_html(card: SoilHealthCard) -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Kannada:wght@400;600&display=swap" rel="stylesheet">
 <title>GREENROOT Soil Health Card — {_esc(card.district)}</title>
 <style>{_HTML_STYLE}</style>
 </head>
 <body>
   <div class="card">
     <header>
-      <h1>GREENROOT — Farmer Soil Health Card</h1>
-      <p>Precision Agriculture Decision Support System</p>
+      <h1>GREENROOT — {_esc(card.text("card_title"))}</h1>
+      <p>{_esc(card.text("subtitle"))}</p>
     </header>
     <div class="meta">
-      <div><span>District</span><br><strong>{_esc(card.district)}</strong></div>
-      <div><span>Issued</span><br><strong>{_esc(card.timestamp)}</strong></div>
+      <div><span>{_esc(card.text("district"))}</span><br><strong>{_esc(card.district)}</strong></div>
+      <div><span>{_esc(card.text("issued"))}</span><br><strong>{_esc(card.timestamp)}</strong></div>
       <div><span>Assessment</span><br><strong>Stacking ensemble + XAI consensus</strong></div>
     </div>
     <section>
-      <h2>Recommendation</h2>
+      <h2>{_esc(card.text("recommendation"))}</h2>
       <div class="headline">
-        <span class="crop">{_esc(card.primary_crop)}</span>
-        <span class="conf">{card.confidence:.1f}% model confidence</span>
+        <span class="crop">{_esc(card.crop_name(card.primary_crop))}</span>
+        <span class="conf">{card.confidence:.1f}% — {_esc(card.text("confidence"))}</span>
       </div>
     </section>
     <section>
-      <h2>Tested Soil Chemistry</h2>
+      <h2>{_esc(card.text("soil_chemistry"))}</h2>
       <table>
-        <tr><th>Parameter</th><th class='num'>Value</th><th>Unit</th></tr>
+        <tr><th>{_esc(card.text('parameter'))}</th><th class='num'>{_esc(card.text('value'))}</th><th>{_esc(card.text('unit'))}</th></tr>
 {_html_rows(card.soil_rows())}
       </table>
     </section>
     <section>
-      <h2>Microclimate at Assessment</h2>
+      <h2>{_esc(card.text("microclimate"))}</h2>
       <table>
-        <tr><th>Parameter</th><th class='num'>Value</th><th>Unit</th></tr>
+        <tr><th>{_esc(card.text('parameter'))}</th><th class='num'>{_esc(card.text('value'))}</th><th>{_esc(card.text('unit'))}</th></tr>
 {_html_rows(card.climate_rows())}
       </table>
     </section>
     <section>
-      <h2>Ranked Crop Suitability</h2>
+      <h2>{_esc(card.text("alternatives"))}</h2>
       <table>
-        <tr><th class='num'>Rank</th><th>Crop</th><th class='num'>Confidence</th></tr>
+        <tr><th class='num'>{_esc(card.text('rank'))}</th><th>{_esc(card.text('crop'))}</th><th class='num'>{_esc(card.text('confidence'))}</th></tr>
 {alternatives}
       </table>
     </section>{xai_section}{advisory_section}{fertiliser_section}
     <footer>
-      Advisory only. Corroborate with a certified laboratory soil test
-      before committing the season.
+      {_esc(card.text('disclaimer'))}
     </footer>
   </div>
 </body>
 </html>"""
+
+
+
+# --------------------------------------------------------------------------- #
+# PDF
+# --------------------------------------------------------------------------- #
+#: Brand palette as RGB triples, mirroring the HTML stylesheet.
+_PDF_ACCENT = (31, 122, 77)
+_PDF_INK = (20, 40, 29)
+_PDF_MUTED = (92, 111, 99)
+_PDF_LINE = (213, 224, 216)
+_PDF_PANEL = (244, 248, 245)
+
+#: Severity marker colours for advisory items.
+_PDF_SEVERITY = {
+    "critical": (192, 57, 43),
+    "warning": (217, 139, 14),
+    "info": _PDF_ACCENT,
+}
+
+
+class PDFUnavailableError(RuntimeError):
+    """Raised when the optional PDF dependency is not installed."""
+
+
+def _latin(text: str) -> str:
+    """Reduce text to characters the built-in PDF font can encode.
+
+    fpdf2's core fonts are Latin-1 only. The card's Kannada text therefore
+    cannot be rendered without embedding a Unicode font with Kannada coverage,
+    which is not shipped with this project — so the PDF is English-only and
+    this helper strips anything unencodable rather than raising mid-render.
+    Typographic punctuation is transliterated first so the output stays clean
+    rather than merely legal.
+    """
+    # Order matters: multi-character sequences must precede their prefixes,
+    # so "\u00b0C" is handled before a bare "\u00b0".
+    replacements = {
+        "\u00b0C": "C",
+        "\u2014": "-", "\u2013": "-", "\u2018": "'", "\u2019": "'",
+        "\u201c": '"', "\u201d": '"', "\u2026": "...", "\u00b0": " deg",
+        "\u2264": "<=", "\u2265": ">=", "\u00d7": "x", "\u2192": "->",
+        "\u2229": "n", "\u222a": "u", "\u03c3": "sd",
+    }
+    for source, target in replacements.items():
+        text = text.replace(source, target)
+    return text.encode("latin-1", "ignore").decode("latin-1")
+
+
+def render_pdf(card: SoilHealthCard) -> bytes:
+    """Render the card as a print-ready single-page A4 PDF.
+
+    The PDF is what an extension officer actually hands over, so it is laid out
+    programmatically rather than converted from HTML — no browser or system
+    library is required, and the result is byte-identical across platforms.
+
+    Parameters
+    ----------
+    card:
+        The payload to render. Bilingual cards fall back to English here; see
+        :func:`_latin`.
+
+    Returns
+    -------
+    bytes
+        The PDF document.
+
+    Raises
+    ------
+    PDFUnavailableError
+        If ``fpdf2`` is not installed.
+    """
+    try:
+        from fpdf import FPDF
+    except ImportError as exc:  # pragma: no cover - optional dependency
+        raise PDFUnavailableError(
+            "PDF export needs fpdf2. Install it with: pip install fpdf2"
+        ) from exc
+
+    # The core PDF fonts are Latin-1 only, so a bilingual card is rendered from
+    # its English view: stripping Kannada from "Soil pH / ..." in place would
+    # leave a dangling separator.
+    if card.bilingual:
+        card = dataclasses_replace(card, bilingual=False)
+
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=14)
+    pdf.add_page()
+    width = pdf.w - 2 * pdf.l_margin
+
+    def heading(text: str) -> None:
+        """Section heading in the muted small-caps style of the HTML card."""
+        pdf.ln(3)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(*_PDF_MUTED)
+        pdf.cell(0, 5, _latin(text.upper()), new_x="LMARGIN", new_y="NEXT")
+        pdf.set_draw_color(*_PDF_LINE)
+        pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + width, pdf.get_y())
+        pdf.ln(2)
+
+    def parameter_table(rows: List[Tuple[str, str, str]]) -> None:
+        """Three-column parameter table with alternating row shading."""
+        pdf.set_font("Helvetica", "", 9.5)
+        for index, (name, value, unit) in enumerate(rows):
+            if index % 2 == 0:
+                pdf.set_fill_color(*_PDF_PANEL)
+                fill = True
+            else:
+                fill = False
+            pdf.set_text_color(*_PDF_INK)
+            pdf.cell(width * 0.55, 6.5, _latin(f"  {name}"), fill=fill)
+            pdf.cell(width * 0.25, 6.5, _latin(value), align="R", fill=fill)
+            pdf.cell(
+                width * 0.20, 6.5, _latin(f" {unit}"), fill=fill,
+                new_x="LMARGIN", new_y="NEXT",
+            )
+
+    # ---- Header banner ---------------------------------------------------- #
+    pdf.set_fill_color(*_PDF_ACCENT)
+    pdf.rect(0, 0, pdf.w, 26, style="F")
+    pdf.set_xy(pdf.l_margin, 7)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 15)
+    pdf.cell(0, 7, _latin("GREENROOT - Farmer Soil Health Card"),
+             new_x="LMARGIN", new_y="NEXT")
+    pdf.set_x(pdf.l_margin)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(0, 5, _latin("Precision Agriculture Decision Support System"),
+             new_x="LMARGIN", new_y="NEXT")
+
+    # ---- Meta strip ------------------------------------------------------- #
+    pdf.set_y(30)
+    pdf.set_fill_color(*_PDF_PANEL)
+    pdf.rect(pdf.l_margin, pdf.get_y(), width, 12, style="F")
+    pdf.set_xy(pdf.l_margin + 3, pdf.get_y() + 2)
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_text_color(*_PDF_MUTED)
+    pdf.cell(width * 0.5, 4, _latin("DISTRICT"))
+    pdf.cell(width * 0.5, 4, _latin("ISSUED"), new_x="LMARGIN", new_y="NEXT")
+    pdf.set_x(pdf.l_margin + 3)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_text_color(*_PDF_INK)
+    pdf.cell(width * 0.5, 5, _latin(card.district))
+    pdf.cell(width * 0.5, 5, _latin(card.timestamp), new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(4)
+
+    # ---- Recommendation --------------------------------------------------- #
+    heading("Recommendation")
+    pdf.set_font("Helvetica", "B", 22)
+    pdf.set_text_color(*_PDF_ACCENT)
+    pdf.cell(0, 10, _latin(card.primary_crop.upper()), new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 9.5)
+    pdf.set_text_color(*_PDF_MUTED)
+    pdf.cell(0, 5, _latin(f"{card.confidence:.1f}% model confidence"),
+             new_x="LMARGIN", new_y="NEXT")
+
+    # ---- Measurements ----------------------------------------------------- #
+    heading("Tested Soil Chemistry")
+    parameter_table(card.soil_rows())
+    heading("Microclimate at Assessment")
+    parameter_table(card.climate_rows())
+
+    # ---- Ranked suitability ----------------------------------------------- #
+    heading("Ranked Crop Suitability")
+    pdf.set_font("Helvetica", "", 9.5)
+    for rank, (crop, percentage) in enumerate(card.alternatives, start=1):
+        fill = rank % 2 == 1
+        if fill:
+            pdf.set_fill_color(*_PDF_PANEL)
+        pdf.set_text_color(*_PDF_INK)
+        pdf.cell(width * 0.12, 6.5, _latin(f"  {rank}."), fill=fill)
+        pdf.cell(width * 0.58, 6.5, _latin(crop.capitalize()), fill=fill)
+        pdf.cell(width * 0.30, 6.5, _latin(f"{percentage:.2f}%"), align="R",
+                 fill=fill, new_x="LMARGIN", new_y="NEXT")
+
+    # ---- Explainability --------------------------------------------------- #
+    if card.jaccard is not None:
+        heading("Explainability Audit")
+        pdf.set_font("Helvetica", "", 9.5)
+        pdf.set_text_color(*_PDF_INK)
+        rows = [
+            ("SHAP n LIME Jaccard index (k=3)", f"{card.jaccard:.2f}", ""),
+            ("Consensus verdict", card.consensus_verdict or "n/a", ""),
+        ]
+        if card.shap_drivers:
+            rows.append(("Dominant drivers", ", ".join(card.shap_drivers), ""))
+        parameter_table(rows)
+
+    # ---- Advisory --------------------------------------------------------- #
+    if card.advisory and card.advisory.items:
+        heading("Agronomic Advisory")
+        for item in card.advisory.items:
+            colour = _PDF_SEVERITY.get(item.severity, _PDF_ACCENT)
+            top = pdf.get_y()
+            pdf.set_font("Helvetica", "B", 9)
+            pdf.set_text_color(*colour)
+            pdf.set_x(pdf.l_margin + 3)
+            pdf.cell(0, 4.6, _latin(item.category), new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font("Helvetica", "", 9)
+            pdf.set_text_color(*_PDF_INK)
+            pdf.set_x(pdf.l_margin + 3)
+            pdf.multi_cell(width - 6, 4.4, _latin(item.message))
+            # Severity bar drawn after the text, so its height matches the item.
+            pdf.set_fill_color(*colour)
+            pdf.rect(pdf.l_margin, top, 1.2, pdf.get_y() - top, style="F")
+            pdf.ln(1.6)
+
+    # ---- Fertiliser ------------------------------------------------------- #
+    if card.advisory and card.advisory.fertiliser_plan:
+        heading("Fertiliser Prescription (per hectare)")
+        parameter_table(
+            [(product, f"{quantity:.1f}", "kg")
+             for product, quantity in card.advisory.fertiliser_plan.items()]
+        )
+
+    # ---- Footer ----------------------------------------------------------- #
+    pdf.ln(4)
+    pdf.set_font("Helvetica", "I", 8)
+    pdf.set_text_color(*_PDF_MUTED)
+    pdf.multi_cell(
+        width, 4,
+        _latin(
+            "Advisory only. Corroborate with a certified laboratory soil test "
+            "before committing the season."
+        ),
+        align="C",
+    )
+
+    output = pdf.output()
+    return bytes(output)
 
 
 def save_report(
@@ -477,6 +732,7 @@ def save_report(
         "markdown": render_markdown,
         "md": render_markdown,
         "html": render_html,
+        "pdf": render_pdf,
     }
     renderer = renderers.get(fmt.lower())
     if renderer is None:
@@ -486,7 +742,11 @@ def save_report(
 
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(renderer(card), encoding=encoding)
+    rendered = renderer(card)
+    if isinstance(rendered, bytes):
+        destination.write_bytes(rendered)
+    else:
+        destination.write_text(rendered, encoding=encoding)
     logger.info("Wrote %s report to %s", fmt, destination)
     return destination
 
@@ -529,5 +789,7 @@ __all__ = [
     "render_text",
     "render_markdown",
     "render_html",
+    "render_pdf",
     "save_report",
+    "PDFUnavailableError",
 ]

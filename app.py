@@ -12,6 +12,7 @@ Run with::
 from __future__ import annotations
 
 import base64
+import dataclasses
 import io
 import logging
 from datetime import date, datetime, timedelta
@@ -38,15 +39,18 @@ from src.core.config import (
     REPORTED_CV_ACCURACY,
 )
 from src.database import db_manager
+from src.models.batch import BatchProcessor, BatchResult, MAX_BATCH_ROWS, build_template
 from src.models.inference import CropRecommender, ValidationError
 from src.models.xai_engine import ExplainerConsensus
 from src.services.soil_service import get_district_baseline, list_districts
 from src.services.weather_service import get_weather
 from src.utils.agronomy_advisory import CRITICAL, INFO, WARNING, generate_advisory
 from src.utils.report_generator import (
+    PDFUnavailableError,
     build_card,
     render_html,
     render_markdown,
+    render_pdf,
     render_text,
 )
 
@@ -126,6 +130,15 @@ def load_explainer() -> Optional[ExplainerConsensus]:
         return ExplainerConsensus().fit()
     except Exception as exc:  # noqa: BLE001 - XAI is optional; never block the app.
         logging.warning("Explainability engine unavailable: %s", exc)
+        return None
+
+
+@st.cache_resource(show_spinner=False)
+def load_batch_processor() -> Optional[BatchProcessor]:
+    """Bulk advisory engine, sharing the already-loaded ensemble."""
+    try:
+        return BatchProcessor()
+    except FileNotFoundError:
         return None
 
 
@@ -630,8 +643,197 @@ def render_sensitivity_tab(state: Dict[str, object]) -> None:
         )
 
 
+
 # --------------------------------------------------------------------------- #
-# Tab 4 — Audit Trail & Governance
+# Tab 4 — Bulk Advisory
+# --------------------------------------------------------------------------- #
+def render_bulk_tab() -> None:
+    """Recommendations for a whole survey in one pass.
+
+    An extension officer serves a village, not one cultivator. This tab takes a
+    laboratory CSV export and returns a recommendation per sample, with the
+    rows needing human review surfaced first.
+    """
+    st.markdown("#### Bulk advisory from a soil survey")
+    st.caption(
+        "Upload a laboratory export or survey sheet and receive a "
+        "recommendation for every sample. Column names are matched leniently — "
+        "`N`, `Nitrogen` and `avl_n` are all understood — and each row is "
+        "validated independently, so one bad reading never aborts the run."
+    )
+
+    processor = load_batch_processor()
+    if processor is None:
+        st.error("Model artefacts unavailable; bulk advisory is disabled.")
+        return
+
+    template = build_template()
+    left, right = st.columns([2, 1], gap="large")
+    with left:
+        upload = st.file_uploader(
+            "Soil survey file",
+            type=["csv", "xlsx"],
+            help=(
+                f"CSV or Excel, up to {MAX_BATCH_ROWS:,} rows. Required "
+                f"columns: {', '.join(FEATURE_NAMES)}."
+            ),
+        )
+    with right:
+        st.markdown("**No file to hand?**")
+        st.download_button(
+            "⬇️ Download template",
+            data=template.to_csv(index=False),
+            file_name="greenroot_bulk_template.csv",
+            mime="text/csv",
+            width="stretch",
+        )
+        if st.button("▶️ Run the template", width="stretch"):
+            st.session_state["bulk_source"] = template
+
+    if upload is not None:
+        try:
+            if upload.name.lower().endswith(".xlsx"):
+                try:
+                    st.session_state["bulk_source"] = pd.read_excel(upload)
+                except ImportError:
+                    # Reading .xlsx needs an optional engine; say so plainly
+                    # rather than surfacing pandas' internal message.
+                    st.error(
+                        "Reading Excel files needs the `openpyxl` package. "
+                        "Install it with `pip install openpyxl`, or save the "
+                        "sheet as CSV and upload that instead."
+                    )
+                    return
+            else:
+                st.session_state["bulk_source"] = pd.read_csv(upload)
+        except Exception as exc:  # noqa: BLE001 - surface any parse failure.
+            st.error(f"Could not read the file: {exc}")
+            return
+
+    source = st.session_state.get("bulk_source")
+    if source is None:
+        with st.expander("Expected file format"):
+            st.dataframe(template, hide_index=True, width="stretch")
+            st.caption(
+                "Optional columns `sample_id`, `district`, `village` and "
+                "`farmer` are carried through to the output for traceability."
+            )
+        return
+
+    st.markdown(f"**Loaded {len(source):,} row(s)** · {len(source.columns)} columns")
+    with st.expander("Preview the uploaded data"):
+        st.dataframe(source.head(20), hide_index=True, width="stretch")
+
+    try:
+        with st.spinner(f"Scoring {len(source):,} samples…"):
+            result = processor.process(source)
+    except ValueError as exc:
+        st.error(f"**Cannot process this file.** {exc}")
+        return
+
+    _render_bulk_result(result)
+
+
+def _render_bulk_result(result: BatchResult) -> None:
+    """Render the summary, review queue, and exports for a bulk run."""
+    summary = result.summary()
+
+    metrics = st.columns(5)
+    metrics[0].metric("Processed", f"{summary['processed']:,}")
+    metrics[1].metric("Rejected", f"{summary['rejected']:,}")
+    metrics[2].metric("Distinct crops", summary["distinct_crops"])
+    metrics[3].metric("Mean confidence", f"{summary['mean_confidence']:.1f}%")
+    metrics[4].metric(
+        "Needs review",
+        f"{summary['low_confidence'] + summary['out_of_distribution']:,}",
+        help="Samples with confidence below 50% or inputs outside the "
+             "training distribution.",
+    )
+
+    with st.expander("How your column headers were interpreted"):
+        st.dataframe(
+            pd.DataFrame(
+                {
+                    "Model feature": list(result.resolved_columns),
+                    "Your column": list(result.resolved_columns.values()),
+                }
+            ),
+            hide_index=True,
+            width="stretch",
+        )
+
+    if result.is_empty:
+        st.warning("No row passed validation. See the rejected rows below.")
+    else:
+        flagged = result.flagged()
+        if not flagged.empty:
+            st.warning(
+                f"**{len(flagged)} sample(s) need human review** — low "
+                f"confidence or inputs beyond the training distribution. A "
+                f"bulk run is exactly where a quietly extrapolated "
+                f"recommendation would otherwise pass unnoticed."
+            )
+            with st.expander("Review queue", expanded=True):
+                st.dataframe(flagged, hide_index=True, width="stretch")
+
+        st.markdown("#### Recommendations")
+        st.dataframe(result.recommendations, hide_index=True, width="stretch", height=360)
+
+        distribution = result.crop_distribution()
+        chart, table = st.columns([1.6, 1], gap="large")
+        with chart:
+            figure, axes = plt.subplots(
+                figsize=(8, max(2.6, 0.36 * len(distribution)))
+            )
+            axes.barh(
+                distribution["crop"][::-1],
+                distribution["count"][::-1],
+                color=ACCENT,
+                height=0.62,
+            )
+            axes.set_xlabel("Samples recommended", fontsize=10)
+            axes.set_title("Recommended crop distribution across the survey", fontsize=11)
+            _style_axes(axes)
+            figure.tight_layout()
+            st.pyplot(figure, width="stretch")
+            plt.close(figure)
+        with table:
+            display = distribution.copy()
+            display["share"] = (display["share"] * 100).round(1).astype(str) + "%"
+            display["mean_confidence"] = display["mean_confidence"].round(1)
+            st.dataframe(display, hide_index=True, width="stretch")
+
+    if not result.rejected.empty:
+        st.markdown("#### Rejected rows")
+        st.caption(
+            "Each row is reported with its 1-based position in your file and "
+            "the reason it was inadmissible, so the source data can be "
+            "corrected."
+        )
+        st.dataframe(result.rejected, hide_index=True, width="stretch")
+
+    stamp = f"{datetime.now():%Y%m%d_%H%M}"
+    downloads = st.columns(2)
+    if not result.is_empty:
+        downloads[0].download_button(
+            "⬇️ Recommendations (CSV)",
+            data=result.recommendations.to_csv(index=False),
+            file_name=f"greenroot_bulk_recommendations_{stamp}.csv",
+            mime="text/csv",
+            width="stretch",
+        )
+    if not result.rejected.empty:
+        downloads[1].download_button(
+            "⬇️ Rejected rows (CSV)",
+            data=result.rejected.to_csv(index=False),
+            file_name=f"greenroot_bulk_rejected_{stamp}.csv",
+            mime="text/csv",
+            width="stretch",
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Tab 5 — Audit Trail & Governance
 # --------------------------------------------------------------------------- #
 def render_audit_tab() -> None:
     """Filterable view over the persisted recommendation ledger."""
@@ -699,7 +901,7 @@ def render_audit_tab() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Tab 5 — Farmer Soil Health Card
+# Tab 6 — Farmer Soil Health Card
 # --------------------------------------------------------------------------- #
 def render_card_tab(state: Dict[str, object]) -> None:
     """Printable soil health card in three export formats."""
@@ -708,44 +910,89 @@ def render_card_tab(state: Dict[str, object]) -> None:
         st.info("Generate a recommendation first to issue a soil health card.")
         return
 
-    card = build_card(
-        district=str(state["district"]),
-        prediction=prediction,
-        advisory=state["advisory"],
-        consensus=state.get("consensus"),
-    )
-
     st.markdown("#### Printable soil health card")
     st.caption(
-        "The card an extension officer hands to the cultivator. All three "
-        "exports render from one payload, so the figures cannot diverge."
+        "The card an extension officer hands to the cultivator. Every export "
+        "renders from one payload, so the figures cannot diverge between "
+        "formats."
+    )
+
+    controls = st.columns([1.4, 2])
+    bilingual = controls[0].toggle(
+        "ಕನ್ನಡ · Bilingual card",
+        value=False,
+        help="Show Kannada alongside English on the farmer-facing card.",
+    )
+    if bilingual:
+        controls[1].caption(
+            "English is retained beside every Kannada term, so a translation "
+            "error cannot silently change the advice. Translations are a "
+            "prototype mapping and need native-speaker review before field use."
+        )
+
+    card = dataclasses.replace(
+        build_card(
+            district=str(state["district"]),
+            prediction=prediction,
+            advisory=state["advisory"],
+            consensus=state.get("consensus"),
+        ),
+        bilingual=bilingual,
     )
 
     st.iframe(_as_data_uri(render_html(card)), height=900)
 
     stamp = f"{datetime.now():%Y%m%d_%H%M}"
-    downloads = st.columns(3)
-    downloads[0].download_button(
-        "⬇️ HTML (print-ready)",
+    downloads = st.columns(4)
+
+    try:
+        pdf_bytes = render_pdf(card)
+    except PDFUnavailableError:
+        pdf_bytes = None
+
+    if pdf_bytes is not None:
+        downloads[0].download_button(
+            "⬇️ PDF (print)",
+            data=pdf_bytes,
+            file_name=f"soil_health_card_{stamp}.pdf",
+            mime="application/pdf",
+            type="primary",
+            width="stretch",
+        )
+    else:
+        downloads[0].button(
+            "PDF unavailable", disabled=True, width="stretch",
+            help="Install the optional dependency: pip install fpdf2",
+        )
+
+    downloads[1].download_button(
+        "⬇️ HTML",
         data=render_html(card),
         file_name=f"soil_health_card_{stamp}.html",
         mime="text/html",
         width="stretch",
     )
-    downloads[1].download_button(
+    downloads[2].download_button(
         "⬇️ Markdown",
         data=render_markdown(card),
         file_name=f"soil_health_card_{stamp}.md",
         mime="text/markdown",
         width="stretch",
     )
-    downloads[2].download_button(
+    downloads[3].download_button(
         "⬇️ Plain text",
         data=render_text(card),
         file_name=f"soil_health_card_{stamp}.txt",
         mime="text/plain",
         width="stretch",
     )
+
+    if bilingual and pdf_bytes is not None:
+        st.caption(
+            "The PDF is English-only: its core fonts are Latin-1 and this "
+            "project does not bundle a Kannada typeface. Use the HTML export "
+            "for a bilingual printout."
+        )
 
     with st.expander("Plain-text preview (SMS / thermal printer)"):
         st.code(render_text(card), language=None)
@@ -816,6 +1063,7 @@ def main() -> None:
             "🎯 Precision Recommendation",
             "🔍 Explainable AI Consensus",
             "🧭 What-If Sensitivity",
+            "📦 Bulk Advisory",
             "📋 Audit Trail & Governance",
             "🧾 Farmer Soil Health Card",
         ]
@@ -827,8 +1075,10 @@ def main() -> None:
     with tabs[2]:
         render_sensitivity_tab(state)
     with tabs[3]:
-        render_audit_tab()
+        render_bulk_tab()
     with tabs[4]:
+        render_audit_tab()
+    with tabs[5]:
         render_card_tab(state)
 
     st.markdown("---")

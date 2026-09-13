@@ -50,7 +50,7 @@ if defined MISSING (
 echo [2/4] Artefacts    : stacking_model.pkl, scaler.pkl, class_names.pkl
 
 REM ---- 3. Install dependencies on first run -------------------------
-%PYTHON% -c "import streamlit, sklearn, shap, lime" >nul 2>&1
+%PYTHON% -c "import streamlit, sklearn, shap, lime, fpdf" >nul 2>&1
 if errorlevel 1 (
     echo [3/4] Dependencies : installing, this may take a few minutes...
     %PYTHON% -m pip install --upgrade pip >nul 2>&1

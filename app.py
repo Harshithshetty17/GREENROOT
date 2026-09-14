@@ -1417,13 +1417,13 @@ def render_recommendation_tab(state: Dict[str, object]) -> None:
         season = str(state.get("season") or season_lib.KHARIF)
         fit = season_lib.assess(prediction.crop, season)
         if not fit.suitable:
-            st.error(f"📅 **{tr('season_clash', simple)}** — {fit.message(simple)}")
+            st.error(f"📅 **{tr('season_clash', simple)}** — {fit.message(simple, current_language())}")
         elif fit.is_perennial:
             # Not silence: "the season does not apply here" is itself the
             # answer, and leaving it out looks like the check never ran.
-            st.info(f"📅 {fit.message(simple)}")
+            st.info(f"📅 {fit.message(simple, current_language())}")
         else:
-            st.success(f"📅 {fit.message(simple)}")
+            st.success(f"📅 {fit.message(simple, current_language())}")
 
         if prediction.is_low_confidence:
             st.warning(tr("low_confidence", simple))

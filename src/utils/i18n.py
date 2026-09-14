@@ -210,6 +210,58 @@ def band_words(label: str, detail: str, language: str = ENGLISH) -> Tuple[str, s
     return found if found else (label, detail)
 
 
+#: Season names. The English carries a parenthetical gloss ("Kharif
+#: (monsoon)") which Kannada does not need -- ಮುಂಗಾರು *is* the monsoon season.
+KANNADA_SEASONS: Dict[str, str] = {
+    "kharif": "ಮುಂಗಾರು",
+    "rabi": "ಹಿಂಗಾರು",
+    "summer": "ಬೇಸಿಗೆ",
+    "perennial": "ಬಹುವಾರ್ಷಿಕ",
+}
+
+#: Season-fit sentences. Templates rather than fixed strings, because the
+#: crop and the season are interpolated -- and Kannada word order is not
+#: English word order, so these are written as whole sentences rather than
+#: assembled from translated fragments.
+KANNADA_SEASON_MESSAGES: Dict[str, str] = {
+    "perennial": (
+        "{crop} ಒಂದು ದೀರ್ಘಕಾಲದ ಬೆಳೆ — ಒಮ್ಮೆ ನೆಟ್ಟರೆ ವರ್ಷಗಟ್ಟಲೆ ಫಸಲು "
+        "ಕೊಡುತ್ತದೆ, ಹಾಗಾಗಿ ಬಿತ್ತನೆ ಕಾಲ ಮುಖ್ಯವಲ್ಲ."
+    ),
+    "suitable": (
+        "{crop} ಸಾಮಾನ್ಯವಾಗಿ {seasons} ಕಾಲದಲ್ಲಿ ಬಿತ್ತುತ್ತಾರೆ, ಹಾಗಾಗಿ ನಿಮ್ಮ "
+        "ಕಾಲಕ್ಕೆ ಇದು ಸರಿಹೊಂದುತ್ತದೆ."
+    ),
+    "clash": (
+        "{crop} ಅನ್ನು {season} ಕಾಲದಲ್ಲಿ ಸಾಮಾನ್ಯವಾಗಿ ಬಿತ್ತುವುದಿಲ್ಲ — ಇದು "
+        "{seasons} ಬೆಳೆ. ನಿಮ್ಮ ಮಣ್ಣು ಸರಿಯಿದೆ, ಆದರೆ ಸಮಯ ಸರಿಯಿಲ್ಲ. ಸರಿಯಾದ "
+        "ಕಾಲಕ್ಕೆ ಕಾಯಿರಿ, ಅಥವಾ ಈಗ ಬಿತ್ತಬಹುದಾದ ಮುಂದಿನ ಬೆಳೆಯನ್ನು ಆರಿಸಿ."
+    ),
+}
+
+
+def season_name(key: str, english: str, language: str = ENGLISH) -> str:
+    """A season's name, without the English parenthetical gloss."""
+    if normalise(language) != KANNADA:
+        return english
+    return KANNADA_SEASONS.get(str(key).lower(), english)
+
+
+def season_message(
+    kind: str, language: str = ENGLISH, **parts: str
+) -> Optional[str]:
+    """A season-fit sentence in Kannada, or ``None`` to use the English.
+
+    ``None`` rather than a fallback string, so the caller keeps whatever it
+    would have said -- these sentences interpolate a crop name and a season
+    list that the caller already has in the right form.
+    """
+    if normalise(language) != KANNADA:
+        return None
+    template = KANNADA_SEASON_MESSAGES.get(kind)
+    return template.format(**parts) if template else None
+
+
 def available_languages() -> List[Tuple[str, str]]:
     """``[("en", "English"), ("kn", "ಕನ್ನಡ")]`` for a picker."""
     return list(LANGUAGES.items())
@@ -270,4 +322,6 @@ __all__ = [
     "KANNADA_UI", "KANNADA_EXTRA",
     "available_languages", "is_supported", "normalise", "translate",
     "coverage", "review_note", "KANNADA_BANDS", "band_words",
+    "KANNADA_SEASONS", "KANNADA_SEASON_MESSAGES",
+    "season_name", "season_message",
 ]

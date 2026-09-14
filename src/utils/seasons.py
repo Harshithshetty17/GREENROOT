@@ -118,8 +118,49 @@ class SeasonFit:
             return names[0]
         return ", ".join(names[:-1]) + " or " + names[-1]
 
-    def message(self, simple: bool = True) -> str:
-        """Return the advice line for this fit."""
+    def sowable_labels_in(self, language: str = "en") -> str:
+        """Seasons this crop suits, named in the given language."""
+        from src.utils.i18n import season_name
+
+        names = [
+            season_name(s, SEASONS.get(s, (s, ""))[0].split(" (")[0], language)
+            for s in self.sowable_in
+        ]
+        if not names:
+            return "no recorded season"
+        if len(names) == 1:
+            return names[0]
+        joiner = " ಅಥವಾ " if language == "kn" else " or "
+        return ", ".join(names[:-1]) + joiner + names[-1]
+
+    def message(self, simple: bool = True, language: str = "en") -> str:
+        """Return the advice line for this fit.
+
+        The Kannada versions are whole sentences rather than translated
+        fragments assembled in English order -- Kannada puts the verb last,
+        so building one from parts would read as nonsense.
+        """
+        if simple and language == "kn":
+            from src.utils.agronomy import kannada_name
+            from src.utils.i18n import season_message, season_name
+
+            crop_kn = kannada_name(self.crop).split(" (")[0]
+            kind = (
+                "perennial" if self.is_perennial
+                else "suitable" if self.suitable
+                else "clash"
+            )
+            rendered = season_message(
+                kind,
+                language,
+                crop=crop_kn,
+                season=season_name(
+                    self.season, self.season_label.split(" (")[0], language),
+                seasons=self.sowable_labels_in(language),
+            )
+            if rendered:
+                return rendered
+
         if self.is_perennial:
             return (
                 f"{self.crop.capitalize()} is a long-term crop — you plant it "

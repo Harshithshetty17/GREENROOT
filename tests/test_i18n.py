@@ -124,3 +124,57 @@ class TestReviewHonesty:
 
     def test_it_says_the_translation_is_unchecked(self):
         assert "not been checked" in i18n.REVIEW_STATUS
+
+
+# --------------------------------------------------------------------------- #
+# Season sentences
+# --------------------------------------------------------------------------- #
+from src.utils import seasons  # noqa: E402
+
+
+class TestSeasonMessages:
+    @pytest.mark.parametrize("crop,season", [
+        ("rice", "rabi"), ("rice", "kharif"), ("coconut", "rabi"),
+    ])
+    def test_all_three_shapes_render_in_kannada(self, crop, season):
+        fit = seasons.assess(crop, season)
+        out = fit.message(True, "kn")
+        assert any("ಀ" <= ch <= "೿" for ch in out)
+        assert out != fit.message(True, "en")
+
+    def test_the_crop_is_named_in_kannada_not_english(self, ):
+        """A Kannada sentence with an English crop name in the middle reads
+        as broken."""
+        out = seasons.assess("rice", "rabi").message(True, "kn")
+        assert "ಭತ್ತ" in out
+        assert "Rice" not in out
+
+    def test_the_season_is_named_in_kannada(self):
+        out = seasons.assess("rice", "rabi").message(True, "kn")
+        assert "ಹಿಂಗಾರು" in out          # Rabi
+        assert "Rabi" not in out
+
+    def test_no_leftover_template_placeholders(self):
+        for crop, season in [("rice", "rabi"), ("rice", "kharif"),
+                             ("coconut", "rabi")]:
+            out = seasons.assess(crop, season).message(True, "kn")
+            assert "{" not in out and "}" not in out
+
+    def test_english_is_unchanged(self):
+        fit = seasons.assess("rice", "rabi")
+        assert fit.message(True) == fit.message(True, "en")
+
+    def test_technical_register_stays_english(self):
+        fit = seasons.assess("rice", "rabi")
+        assert fit.message(False, "kn") == fit.message(False, "en")
+
+    def test_multiple_seasons_are_joined_in_kannada(self):
+        """English joins with 'or'; Kannada must not."""
+        out = seasons.assess("rice", "kharif").sowable_labels_in("kn")
+        assert " or " not in out
+        assert "ಅಥವಾ" in out
+
+    @pytest.mark.parametrize("crop", sorted(seasons.CROP_SEASONS))
+    def test_every_crop_produces_a_kannada_sentence(self, crop):
+        out = seasons.assess(crop, "kharif").message(True, "kn")
+        assert out.strip() and "{" not in out

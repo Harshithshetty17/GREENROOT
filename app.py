@@ -139,6 +139,29 @@ _CSS = """
   .gr-read .v small { font-size: 11.5px; font-weight: 600; opacity: .72;
                       margin-left: 2px; letter-spacing: 0; }
 
+  /* The three driver readouts sit side by side and are compared at a
+     glance, so they need a shared baseline and a shared edge. */
+  .gr-drivercard { border: 1px solid #dfe8e2; border-radius: 12px;
+                   padding: 13px 15px; background: #fff; height: 100%; }
+  .gr-drivercard.agree { background: #f3f8f5; border-color: #c3ddce; }
+  .gr-drivercard .k { font-size: 11.5px; letter-spacing: .5px;
+                      text-transform: uppercase; color: #5c6f63;
+                      font-weight: 650; }
+  .gr-drivercard .v { font-size: 16px; font-weight: 650; color: #14281d;
+                      line-height: 1.35; margin-top: 5px; }
+  .gr-drivercard.agree .v { color: #14603c; }
+
+  /* After a run the banner carries the answer, not the inputs: it repeats
+     on every tab, so it has to be short. */
+  .gr-hero-compact { padding: 14px 26px 15px; margin-bottom: 14px; }
+  .gr-hero-answer { display: flex; align-items: baseline; gap: 12px;
+                    flex-wrap: wrap; margin-top: 8px; }
+  .gr-hero-answer .crop { font-size: 30px; font-weight: 750; line-height: 1.05;
+                          text-transform: uppercase; letter-spacing: .5px; }
+  .gr-hero-answer .score { font-size: 14px; font-weight: 600; opacity: .92; }
+  .gr-hero-reads { margin-top: 7px; font-size: 12.5px; opacity: .80;
+                   letter-spacing: .2px; }
+
   /* Empty-state guidance: on-brand, and it says something worth reading
      instead of a stock blue notice restating the button label. */
   .gr-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
@@ -242,10 +265,21 @@ _CSS = """
       width: 100% !important; flex: 1 1 100% !important; min-width: 0 !important;
     }
 
+    /* A row of metrics would read better side by side than stacked, but
+       there is no safe selector for it: :has(... stMetric) also matches the
+       main two-column layout, because a metric sits somewhere inside its
+       left column, and that layout must stack or the crop card wraps to
+       three words a line. Stacked metrics cost space; an unstacked page is
+       broken. */
+
     .gr-hero { padding: 16px 16px 14px; border-radius: 14px; }
     .gr-hero h1 { font-size: 21px; }
     .gr-hero p  { font-size: 12.5px; }
     .gr-hero-place { font-size: 12px; padding: 3px 10px; }
+    .gr-hero-compact { padding: 13px 16px 14px; }
+    .gr-hero-answer .crop { font-size: 25px; }
+    .gr-hero-answer .score { font-size: 13px; }
+    .gr-hero-reads { font-size: 11.5px; }
     /* Six tiles across 390px gives 55px each -- too narrow for "190 mm".
        Three across two rows keeps every value on one line. */
     .gr-reads { grid-template-columns: repeat(3, 1fr); margin-top: 13px; }
@@ -1014,9 +1048,11 @@ def render_xai_tab(state: Dict[str, object]) -> None:
                 consensus.consensus_drivers,
             ),
         ):
+            agreed = names is consensus.consensus_drivers
             column.markdown(
-                f"<div class='gr-sub'>{heading}</div>"
-                f"<div class='gr-driver'>{driver_names(names)}</div>",
+                f"<div class='gr-drivercard{' agree' if agreed else ''}'>"
+                f"<div class='k'>{heading}</div>"
+                f"<div class='v'>{driver_names(names)}</div></div>",
                 unsafe_allow_html=True,
             )
 
@@ -1058,10 +1094,13 @@ def render_xai_tab(state: Dict[str, object]) -> None:
             )
             _style_axes(axes[index])
         figure.suptitle(
-            f"Why {consensus.predicted_crop} was chosen"
+            f"Why {consensus.predicted_crop.title()} was chosen"
             if simple
-            else f"Local attributions for the {consensus.predicted_crop} decision",
+            else "Local attributions for the "
+            f"{consensus.predicted_crop.title()} decision",
             fontsize=11.5,
+            x=0.01,
+            ha="left",
         )
         figure.tight_layout()
         st.pyplot(figure, width="stretch")
@@ -1145,7 +1184,7 @@ def render_sensitivity_tab(state: Dict[str, object]) -> None:
     # at one end of the range still appear.
     ranked = np.argsort(probabilities.max(axis=0))[::-1][:n_curves]
 
-    figure, axes = plt.subplots(figsize=(8.8, 4.4))
+    figure, axes = plt.subplots(figsize=(8.8, 3.8))
     # Crop identity is categorical: fixed slot order, never a generated or
     # cycled hue, and never a value ramp (viridis would double-encode rank).
     palette = series_palette(len(ranked))
@@ -1176,8 +1215,19 @@ def render_sensitivity_tab(state: Dict[str, object]) -> None:
     )
     axes.set_ylim(-0.02, 1.02)
     # A legend is always present for >= 2 series, so identity is never
-    # carried by colour alone.
-    axes.legend(frameon=False, fontsize=10, ncol=min(len(ranked) + 1, 4))
+    # carried by colour alone. It goes ABOVE the axes: matplotlib's default
+    # loc="best" scores candidate corners for emptiness, and on a sweep where
+    # the curves span the full 0-1 range every corner is occupied, so it lands
+    # on top of the data.
+    axes.legend(
+        loc="lower center",
+        bbox_to_anchor=(0.5, 1.01),
+        ncol=min(len(ranked) + 1, 4),
+        frameon=False,
+        fontsize=10,
+        handlelength=1.6,
+        columnspacing=1.4,
+    )
     _style_axes(axes, grid_axis="y")
     figure.tight_layout()
     st.pyplot(figure, width="stretch")
@@ -1414,6 +1464,56 @@ def _render_bulk_result(result: BatchResult) -> None:
 # --------------------------------------------------------------------------- #
 # Tab 5 — Audit Trail & Governance
 # --------------------------------------------------------------------------- #
+def _record_date(stamp: object, simple: bool) -> str:
+    """A saved record's date, in the register the reader is being addressed in.
+
+    Technical mode keeps the ISO form, which is what the ledger stores and
+    what an examiner will want to match against the database.
+    """
+    parsed = pd.to_datetime(stamp, errors="coerce")
+    if pd.isna(parsed):
+        return "unknown date" if simple else str(stamp)[:10]
+    return f"{parsed:%d %b %Y}" if simple else f"{parsed:%Y-%m-%d}"
+
+
+def _farmer_ledger(frame: pd.DataFrame) -> pd.DataFrame:
+    """The ledger as a farmer can read it.
+
+    The stored frame is the audit schema: ISO timestamps, raw column keys,
+    and two columns -- primary_shap_driver and jaccard_index -- that are
+    meaningful to an examiner and meaningless to the person who saved the
+    record. Showing those to someone the rest of the app addresses in plain
+    words undoes the plain words.
+    """
+    view = pd.DataFrame(
+        {
+            "Saved on": pd.to_datetime(
+                frame["timestamp"], errors="coerce"
+            ).dt.strftime("%d %b %Y"),
+            "Place": frame["district"],
+            "Crop": frame["recommended_crop"].astype(str).str.title(),
+            "Match": frame["confidence"].round().astype("Int64").astype(str)
+            + " / 100",
+            "Nitrogen": frame["N"].round().astype("Int64"),
+            "Phosphorus": frame["P"].round().astype("Int64"),
+            "Potassium": frame["K"].round().astype("Int64"),
+            "Soil pH": frame["pH"].round(1),
+            "Rain (mm)": frame["rainfall"].round().astype("Int64"),
+        }
+    )
+    # An unparseable timestamp would render as "NaT"; say so in words.
+    return view.assign(**{"Saved on": view["Saved on"].fillna("unknown")})
+
+
+def _table_height(rows: int, cap: int = 380) -> int:
+    """Fit the grid to its content.
+
+    Streamlit pads a fixed-height dataframe with empty rows, so a one-record
+    ledger otherwise renders nine blank lines and reads as a loading failure.
+    """
+    return int(min(cap, 38 + 36 * max(rows, 1)))
+
+
 def render_audit_tab() -> None:
     """Filterable view over the persisted recommendation ledger."""
     simple = is_simple()
@@ -1431,18 +1531,25 @@ def render_audit_tab() -> None:
         st.error("Audit database is unavailable in this environment.")
         return
 
-    controls = st.columns([1, 1, 1, 1])
+    # Folded away by default: stacked on a phone these three controls fill
+    # the screen before a single saved record is visible, and the default
+    # window -- the last 30 days -- is the one most people want.
     today = date.today()
-    start = controls[0].date_input("From", value=today - timedelta(days=30))
-    end = controls[1].date_input("To", value=today)
-    limit = controls[2].number_input("Max records", 10, 5000, 200, step=10)
+    with st.expander(
+        "Change the dates" if simple else "Filter the ledger", expanded=False
+    ):
+        controls = st.columns(3)
+        start = controls[0].date_input("From", value=today - timedelta(days=30))
+        end = controls[1].date_input("To", value=today)
+        limit = controls[2].number_input(
+            "How many to show" if simple else "Max records", 10, 5000, 200, step=10
+        )
 
     frame = db_manager.fetch_audit_history(
         limit=int(limit),
         start_date=str(start),
         end_date=str(end),
     )
-    controls[3].metric("Total records", f"{db_manager.count_records():,}")
 
     if frame.empty:
         st.info(
@@ -1451,23 +1558,54 @@ def render_audit_tab() -> None:
         )
         return
 
-    summary = st.columns(4)
-    summary[0].metric("Records shown", f"{len(frame):,}")
-    summary[1].metric("Mean confidence", f"{frame['confidence'].mean():.1f}%")
-    summary[2].metric("Distinct crops", f"{frame['recommended_crop'].nunique()}")
-    jaccard = pd.to_numeric(frame["jaccard_index"], errors="coerce").dropna()
-    summary[3].metric(
-        "Mean Jaccard", f"{jaccard.mean():.2f}" if not jaccard.empty else "—"
-    )
+    total = db_manager.count_records()
+    if simple:
+        summary = st.columns(3)
+        summary[0].metric(
+            "Advice saved",
+            f"{len(frame):,}",
+            # Only worth saying when the date window is hiding something.
+            help=None,
+            delta=f"of {total:,} in all" if total != len(frame) else None,
+            delta_color="off",
+        )
+        summary[1].metric(
+            "Average match", f"{frame['confidence'].mean():.0f} / 100"
+        )
+        summary[2].metric(
+            "Different crops", f"{frame['recommended_crop'].nunique()}"
+        )
+    else:
+        summary = st.columns(4)
+        summary[0].metric(
+            "Records shown",
+            f"{len(frame):,}",
+            delta=f"of {total:,} total" if total != len(frame) else None,
+            delta_color="off",
+        )
+        summary[1].metric("Mean confidence", f"{frame['confidence'].mean():.1f}%")
+        summary[2].metric("Distinct crops", f"{frame['recommended_crop'].nunique()}")
+        jaccard = pd.to_numeric(frame["jaccard_index"], errors="coerce").dropna()
+        summary[3].metric(
+            "Mean Jaccard", f"{jaccard.mean():.2f}" if not jaccard.empty else "—"
+        )
 
-    st.dataframe(frame, hide_index=True, width="stretch", height=380)
+    st.dataframe(
+        _farmer_ledger(frame) if simple else frame,
+        hide_index=True,
+        width="stretch",
+        height=_table_height(len(frame)),
+    )
 
     # Reload a past reading into the form. An officer revisiting a plot should
     # not have to retype seven numbers off a printout.
     reload_columns = st.columns([2, 1])
     options = {
-        f"#{int(row['id'])} · {row['district']} · {row['recommended_crop']} "
-        f"· {str(row['timestamp'])[:10]}": row
+        (
+            f"#{int(row['id'])} · {row['district']} · "
+            f"{str(row['recommended_crop']).title()} · "
+            f"{_record_date(row['timestamp'], simple)}"
+        ): row
         for _, row in frame.iterrows()
     }
     chosen = reload_columns[0].selectbox(
@@ -1497,14 +1635,18 @@ def render_audit_tab() -> None:
     buffer = io.StringIO()
     frame.to_csv(buffer, index=False)
     st.download_button(
-        "⬇️ Download audit trail (CSV)",
+        "⬇️ Download all of this (CSV)" if simple
+        else "⬇️ Download audit trail (CSV)",
         data=buffer.getvalue(),
         file_name=f"greenroot_audit_{datetime.now():%Y%m%d_%H%M}.csv",
         mime="text/csv",
         width="stretch",
     )
 
-    with st.expander("Distribution by recommended crop"):
+    with st.expander(
+        "Which crops came up most" if simple
+        else "Distribution by recommended crop"
+    ):
         counts = frame["recommended_crop"].value_counts()
         figure, axes = plt.subplots(figsize=(9, max(2.4, 0.34 * len(counts))))
         axes.barh(counts.index[::-1], counts.to_numpy()[::-1], color=ACCENT, height=0.6)
@@ -1656,35 +1798,21 @@ def main() -> None:
         f"<div class='v'>{value}<small>{unit}</small></div></div>"
         for label, value, unit in reads
     )
-    st.markdown(
-        f"""<div class="gr-hero">
-              <div class="gr-hero-top">
-                <h1>🌱 GREENROOT</h1>
-                <span class="gr-hero-place">{inputs['district']}</span>
-              </div>
-              <p>{tagline}</p>
-              <div class="gr-reads">{tiles}</div>
-            </div>""",
-        unsafe_allow_html=True,
-    )
 
+    # The hero and the hint below it both depend on whether there is an
+    # answer yet -- but the answer is computed further down, and st.tabs
+    # renders every tab in a single pass and switches between them on the
+    # client, so no rerun happens when the farmer changes tab. Reading
+    # session_state here would leave the banner a full run behind. Reserve
+    # the slots now and fill them once the prediction is known.
+    hero_slot = st.empty()
     bar_left, bar_right = st.columns([2.2, 1], gap="medium")
-    with bar_left:
-        st.markdown(
-            f"<div class='gr-readout-hint'>"
-            + (
-                "These are your land's readings. Tap ☰ at the top to change "
-                "them, then press the green button."
-                if simple
-                else "Adjust soil chemistry and microclimate in the sidebar."
-            )
-            + "</div>",
-            unsafe_allow_html=True,
-        )
+    hint_slot = bar_left.empty()
     with bar_right:
         main_run = st.button(
             tr("run", simple), type="primary", width="stretch", key="run_main"
         )
+
     ensure_database()
 
     if main_run:
@@ -1724,6 +1852,69 @@ def main() -> None:
         "season": inputs["season"],
         "recommender": recommender,
     }
+
+    # Both slots are filled here, after the run handler: this is the first
+    # point in the script where "is there an answer" is finally true or false.
+    answered = st.session_state.get("prediction")
+    if answered is None:
+        hero_slot.markdown(
+            f"""<div class="gr-hero">
+                  <div class="gr-hero-top">
+                    <h1>🌱 GREENROOT</h1>
+                    <span class="gr-hero-place">{inputs['district']}</span>
+                  </div>
+                  <p>{tagline}</p>
+                  <div class="gr-reads">{tiles}</div>
+                </div>""",
+            unsafe_allow_html=True,
+        )
+        hint_slot.markdown(
+            "<div class='gr-readout-hint'>"
+            + (
+                "These are your land's readings. Tap \u2630 at the top to "
+                "change them, then press the green button."
+                if simple
+                else "Adjust soil chemistry and microclimate in the sidebar."
+            )
+            + "</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        band = confidence_band(answered.confidence)
+        score = (
+            f"{band.label} \u00b7 {answered.confidence:.0f} out of 100"
+            if simple
+            else f"{answered.confidence:.2f}% posterior"
+        )
+        # Collapsed: at full height this banner repeats on all six tabs and,
+        # on a phone, pushes every tab's content below the fold.
+        hero_slot.markdown(
+            f"""<div class="gr-hero gr-hero-compact">
+                  <div class="gr-hero-top">
+                    <h1>🌱 GREENROOT</h1>
+                    <span class="gr-hero-place">{inputs['district']}</span>
+                  </div>
+                  <div class="gr-hero-answer">
+                    <span class="crop">{answered.crop}</span>
+                    <span class="score">{score}</span>
+                  </div>
+                  <div class="gr-hero-reads">{
+                      native.readings_summary(features)}</div>
+                </div>""",
+            unsafe_allow_html=True,
+        )
+        hint_slot.markdown(
+            "<div class='gr-readout-hint'>"
+            + (
+                "Changed something? Tap \u2630 at the top to edit your "
+                "readings, then press the button again."
+                if simple
+                else "Adjust the inputs in the sidebar and re-run to refresh "
+                "every tab."
+            )
+            + "</div>",
+            unsafe_allow_html=True,
+        )
 
     tabs = st.tabs(
         [

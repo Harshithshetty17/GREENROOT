@@ -62,6 +62,12 @@ found — an agent that reads them will not repeat them.
 >
 > ### 4. The design rules that matter here
 >
+> **Simple means few decisions, not few features.** The app may grow an
+> account system, a settings screen and plot management and still be simple,
+> provided the farmer's path from opening it to reading advice stays: open →
+> (district already remembered) → one button → the answer. Judge simplicity
+> by the number of choices on that path, not by the size of the codebase.
+>
 > **Remove before you add.** This app has repeatedly been made worse by
 > addition. Five farmer tabs became two and it improved. If you are about to
 > add a panel, first ask what it replaces.
@@ -80,9 +86,74 @@ found — an agent that reads them will not repeat them.
 > `jaccard_index`, no ISO timestamps, no `90.855`. `db.farmer_view()` is the
 > seam; keep everything going through it. Examiner mode keeps the raw row.
 >
+> **Nothing blocks the first answer.** No sign-up wall, no onboarding
+> carousel, no permission prompt before a farmer can see a crop
+> recommendation. Accounts are for keeping your history across devices, and
+> they are earned by the app being useful first — offered *after* a useful
+> answer, never before it.
+>
 > **Plain language is not the same as farmer content.** Translating
 > "explainer consensus" into simple words does not make it something a farmer
 > needs. Cut it from their view instead.
+>
+> ### 4a. Accounts, and the ordinary app furniture
+>
+> The app currently has no accounts and no settings screen. It needs the
+> things people expect any app to have — but built for this audience, not
+> copied from a SaaS dashboard.
+>
+> **Sign-in — phone number, not email.** Most users here do not use email.
+> Phone + OTP, or phone + a 4-digit PIN if you have no SMS gateway. Never
+> email/password as the only route.
+>
+> Required screens and states:
+>
+> | Surface | Requirement |
+> |---|---|
+> | **Guest mode** | Full recommendation flow with no account. This is the default and must never regress. |
+> | **Sign in / Sign up** | One flow, not two. Entering a number either signs in or creates the account. |
+> | **Logout** | Reachable in two taps. Warns that unsynced local advice stays on the device. |
+> | **Account recovery** | A lost PIN must be recoverable by OTP. Do not strand people. |
+> | **Delete my account** | Required by Google Play, and non-negotiable ethically. Must actually delete, and say what it deletes. |
+> | **Profile** | Name, village, default district, plot size. Pre-fills the form so a returning user presses one button. |
+> | **My plots** | A farmer with three fields needs three saved plots with their own readings — not one global form. This is the single most useful account feature. |
+> | **Settings** | Language, units, notifications, clear local data. |
+> | **Language switch** | English / ಕನ್ನಡ. See §8 item 1 — the translations are not yet native-reviewed and must be marked so. |
+> | **Notifications** | Opt-in only. Sowing-window reminders, spray-weather warnings, top-dressing dates from the crop roadmap. Never marketing. |
+> | **Help & support** | A short FAQ, and a real contact route. |
+> | **About** | Version, what the model is, the disclaimer, links to privacy and terms. |
+> | **Offline indicator** | Say plainly when advice is from cached data rather than live. |
+>
+> **Security requirements — an agent left alone gets these wrong:**
+>
+> - Hash with **bcrypt or argon2**. Never plaintext, never MD5/SHA-1, never
+>   a hand-rolled scheme.
+> - No secrets in the repo. Keys come from environment or
+>   `.streamlit/secrets.toml`, which stays gitignored.
+> - Rate-limit OTP and PIN attempts, or you have built a free SMS cannon and
+>   a brute-force target.
+> - Session tokens must be random, expiring and revocable on logout.
+>   Streamlit's `session_state` alone is not authentication — it is per-browser
+>   -session memory and does not survive a refresh.
+> - Scope every read to the signed-in user. A farmer must never see another
+>   farmer's ledger. Add `user_id` to queries, not just to the UI.
+>
+> **Database work this implies.** `audit_logs` has no user column and
+> `SCHEMA_VERSION` is 1. Adding accounts means a `users` table, a
+> `user_id` column on `audit_logs`, and bumping `SCHEMA_VERSION` to 2 with a
+> forward migration in `_migrate()` — it already has an additive-column
+> pattern to follow. **Existing rows must survive**, attributed to a guest
+> or legacy user. Do not drop and recreate the table.
+>
+> **Privacy consequences.** A phone number is personal data, which the app
+> does not currently collect. `PRIVACY.md` and the Play data-safety
+> declaration in `android/PLAYSTORE.md` both say so today and would both
+> become wrong. Update them in the same change, not afterwards.
+>
+> **What "simple" means alongside all this.** Every one of the above lives
+> behind a profile icon or in Settings. None of it appears in the
+> recommendation flow. If a farmer who never signs in notices any of this
+> work except a small "Sign in" affordance, it has been built wrong.
 >
 > ### 5. Honesty rules — these are not negotiable
 >
@@ -110,6 +181,10 @@ found — an agent that reads them will not repeat them.
 >    paths. Udupi returns a ~43/100 match; Dharwad returns ~60/100. Several
 >    bugs here appeared on only one of the two.
 > 4. You have checked both personas after any layout change.
+> 4a. If you touched accounts: guest mode still reaches an answer with no
+>    sign-in; logout actually clears the session; one user cannot read
+>    another's ledger; and the schema migration was run against a database
+>    containing pre-existing rows, which survived.
 > 5. `md5sum` confirms the model artifacts are unchanged.
 >
 > Playwright is available; Chromium is at

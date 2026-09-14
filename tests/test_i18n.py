@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 
 from src.utils import i18n
+from src.utils.agronomy import roadmap
+from src.utils.reminders import reminders_for
 from src.utils.plain_language import COPY, text
 
 
@@ -124,3 +128,178 @@ class TestReviewHonesty:
 
     def test_it_says_the_translation_is_unchecked(self):
         assert "not been checked" in i18n.REVIEW_STATUS
+
+
+# --------------------------------------------------------------------------- #
+# Season sentences
+# --------------------------------------------------------------------------- #
+from src.utils import seasons  # noqa: E402
+
+
+class TestSeasonMessages:
+    @pytest.mark.parametrize("crop,season", [
+        ("rice", "rabi"), ("rice", "kharif"), ("coconut", "rabi"),
+    ])
+    def test_all_three_shapes_render_in_kannada(self, crop, season):
+        fit = seasons.assess(crop, season)
+        out = fit.message(True, "kn")
+        assert any("ಀ" <= ch <= "೿" for ch in out)
+        assert out != fit.message(True, "en")
+
+    def test_the_crop_is_named_in_kannada_not_english(self, ):
+        """A Kannada sentence with an English crop name in the middle reads
+        as broken."""
+        out = seasons.assess("rice", "rabi").message(True, "kn")
+        assert "ಭತ್ತ" in out
+        assert "Rice" not in out
+
+    def test_the_season_is_named_in_kannada(self):
+        out = seasons.assess("rice", "rabi").message(True, "kn")
+        assert "ಹಿಂಗಾರು" in out          # Rabi
+        assert "Rabi" not in out
+
+    def test_no_leftover_template_placeholders(self):
+        for crop, season in [("rice", "rabi"), ("rice", "kharif"),
+                             ("coconut", "rabi")]:
+            out = seasons.assess(crop, season).message(True, "kn")
+            assert "{" not in out and "}" not in out
+
+    def test_english_is_unchanged(self):
+        fit = seasons.assess("rice", "rabi")
+        assert fit.message(True) == fit.message(True, "en")
+
+    def test_technical_register_stays_english(self):
+        fit = seasons.assess("rice", "rabi")
+        assert fit.message(False, "kn") == fit.message(False, "en")
+
+    def test_multiple_seasons_are_joined_in_kannada(self):
+        """English joins with 'or'; Kannada must not."""
+        out = seasons.assess("rice", "kharif").sowable_labels_in("kn")
+        assert " or " not in out
+        assert "ಅಥವಾ" in out
+
+    @pytest.mark.parametrize("crop", sorted(seasons.CROP_SEASONS))
+    def test_every_crop_produces_a_kannada_sentence(self, crop):
+        out = seasons.assess(crop, "kharif").message(True, "kn")
+        assert out.strip() and "{" not in out
+
+
+class TestFieldCalendarInKannada:
+    """The reminder panel is the first thing a returning farmer reads, and
+    until now every word of it was English on a Kannada screen."""
+
+    def test_stage_name_and_action_both_translate(self):
+        name, action = i18n.stage_words("Early growth",
+                                        "First top dressing: one third...",
+                                        i18n.KANNADA)
+        assert name == "ಆರಂಭಿಕ ಬೆಳವಣಿಗೆ"
+        assert "ಯೂರಿಯಾ" in action
+
+    def test_english_is_returned_unchanged(self):
+        pair = ("Flowering", "Last third of the urea.")
+        assert i18n.stage_words(*pair, i18n.ENGLISH) == pair
+
+    def test_every_roadmap_stage_has_a_translation(self):
+        """Both roadmaps -- annual and perennial -- end to end, so a stage
+        added to agronomy.py without a translation fails here rather than
+        showing up as English on a farmer's screen."""
+        for crop in ("rice", "coconut"):
+            for stage in roadmap(crop):
+                assert stage.name in i18n.KANNADA_STAGES, stage.name
+                assert stage.name in i18n.KANNADA_STAGE_ACTIONS, stage.name
+
+    def test_the_harvest_line_carries_the_day_count(self):
+        _, action = i18n.stage_words("Harvest", "Ready around day 120.",
+                                     i18n.KANNADA, day=120)
+        assert "120" in action
+        assert "{days}" not in action
+
+    def test_an_unknown_stage_falls_back_rather_than_raising(self):
+        assert i18n.stage_words("Ratooning", "Cut low.", i18n.KANNADA) == (
+            "Ratooning", "Cut low.")
+
+
+class TestWhenWords:
+    @pytest.mark.parametrize("days,fragment", [
+        (0, "ಇಂದು"), (1, "ದಿನದಲ್ಲಿ"), (5, "ದಿನಗಳಲ್ಲಿ"),
+        (-1, "ದಿನದ ಹಿಂದೆ"), (-6, "ದಿನಗಳ ಹಿಂದೆ"),
+    ])
+    def test_singular_plural_past_and_future(self, days, fragment):
+        assert fragment in i18n.when_words(days, "ignored", i18n.KANNADA)
+
+    def test_the_number_survives(self):
+        assert "5" in i18n.when_words(5, "in about 5 days", i18n.KANNADA)
+
+    def test_english_passes_straight_through(self):
+        assert i18n.when_words(5, "in about 5 days") == "in about 5 days"
+
+    def test_matches_what_the_reminder_itself_says_in_english(self):
+        """The English is passed in rather than rebuilt, so the two wordings
+        cannot drift apart."""
+        found = reminders_for("rice", "2026-08-11", today=date(2026, 9, 14))
+        assert found
+        for item in found:
+            assert i18n.when_words(item.days_away, item.when_words()) == \
+                item.when_words()
+
+
+class TestInterpolatedPhrases:
+    def test_a_district_and_a_count_are_filled_in(self):
+        said = i18n.phrase("soil_from_survey", "english", i18n.KANNADA,
+                           district="Udupi", count="1,204")
+        assert "Udupi" in said and "1,204" in said and "english" not in said
+
+    def test_english_is_untouched(self):
+        assert i18n.phrase("soil_from_survey", "english", i18n.ENGLISH,
+                           district="Udupi", count="1") == "english"
+
+    def test_an_unknown_key_falls_back_instead_of_raising(self):
+        assert i18n.phrase("no_such_key", "english", i18n.KANNADA,
+                           district="Udupi") == "english"
+
+    def test_every_phrase_accepts_the_district_the_app_passes(self):
+        for key in i18n.KANNADA_PHRASES:
+            assert i18n.phrase(key, "", i18n.KANNADA,
+                               district="Udupi", count="10")
+
+
+class TestNothingIsTranslatedIntoTheVoid:
+    """A translated string nothing reads is worse than a missing one: it
+    reads as covered, it costs a reviewer time in the review sheet, and the
+    screen it was written for is still in English. Eight keys had drifted
+    into that state before this test existed."""
+
+    @staticmethod
+    def _keys_app_reads() -> set:
+        import ast
+        import pathlib
+
+        source = pathlib.Path(__file__).resolve().parents[1] / "app.py"
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+        used = set()
+        for node in ast.walk(tree):
+            # t_extra("key", "English fallback")
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id == "t_extra" and node.args
+                    and isinstance(node.args[0], ast.Constant)):
+                used.add(node.args[0].value)
+            # i18n.KANNADA_EXTRA["key"]
+            if (isinstance(node, ast.Subscript)
+                    and isinstance(node.slice, ast.Constant)
+                    and ast.unparse(node.value).endswith("KANNADA_EXTRA")):
+                used.add(node.slice.value)
+        return used
+
+    def test_every_kannada_extra_is_reachable_from_the_app(self):
+        unused = set(i18n.KANNADA_EXTRA) - self._keys_app_reads()
+        assert not unused, (
+            "translated but never shown: " + ", ".join(sorted(unused))
+        )
+
+    def test_every_key_the_app_asks_for_has_a_translation(self):
+        """The other direction: a call site with no entry silently renders
+        its English fallback on a Kannada screen."""
+        missing = self._keys_app_reads() - set(i18n.KANNADA_EXTRA)
+        assert not missing, (
+            "asked for but untranslated: " + ", ".join(sorted(missing))
+        )

@@ -475,6 +475,25 @@ def score_phrase(confidence: float) -> str:
     return f"{value} out of 100"
 
 
+def _bags_word(count: int, simple: bool = True) -> str:
+    """``bag`` / ``bags`` / ``ಚೀಲ``.
+
+    Kannada does not inflect this noun for number the way English does, so
+    one word covers both and the English singular/plural split happens only
+    on the English side.
+    """
+    if simple and current_language() == i18n.KANNADA:
+        return i18n.KANNADA_EXTRA["bags"]
+    return "bag" if count == 1 else "bags"
+
+
+def _acres_words(acres: float, simple: bool = True) -> str:
+    """``acre`` / ``acres`` / ``ಎಕರೆ``."""
+    if simple and current_language() == i18n.KANNADA:
+        return i18n.KANNADA_EXTRA["acre"]
+    return "acre" if acres == 1 else "acres"
+
+
 def band_for(confidence: float):
     """Confidence band in the current language.
 
@@ -569,7 +588,9 @@ def render_language_picker() -> None:
     current = current_language()
 
     chosen = st.sidebar.radio(
-        "Language / ಭಾಷೆ",
+        # Bilingual on purpose: somebody who cannot read English has not
+        # chosen Kannada yet, so this one label has to work in both.
+        f"Language / {i18n.KANNADA_EXTRA['language']}",
         options=codes,
         index=codes.index(current),
         format_func=lambda code: labels[code],
@@ -669,7 +690,7 @@ def render_account_sidebar(simple: bool) -> None:
             st.rerun()
 
     if user is None:
-        st.sidebar.markdown("#### Your account")
+        st.sidebar.markdown(f"#### {t_extra('account', 'Your account')}")
         st.sidebar.caption(
             "You do not need an account. Sign in only if you want your saved "
             "advice on more than one phone."
@@ -684,7 +705,7 @@ def render_account_sidebar(simple: bool) -> None:
             name = st.text_input("Your name (new accounts only)",
                                  key="signin_name")
             go, make = st.columns(2)
-            if go.button("Sign in", width="stretch"):
+            if go.button(t_extra("sign_in", "Sign in"), width="stretch"):
                 try:
                     signed = auth.sign_in(phone, pin)
                     st.session_state["auth_token"] = auth.issue_token(signed.id)
@@ -739,7 +760,7 @@ def render_account_sidebar(simple: bool) -> None:
     st.sidebar.markdown(f"#### 👤 {user.greeting}")
     st.sidebar.caption(user.masked_phone)
 
-    if st.sidebar.button("Log out", width="stretch"):
+    if st.sidebar.button(t_extra("log_out", "Log out"), width="stretch"):
         _sign_out()
         st.rerun()
 
@@ -892,13 +913,23 @@ def render_controls() -> Dict[str, object]:
     # summary of what they currently say.
     current = st.session_state.get("district_pick", "")
     acres_now = float(st.session_state.get("acres", 1.0))
-    season_now = season_lib.SEASONS[
+
+    # Streamlit restores a selectbox by looking up the label it stored, so
+    # switching language leaves this key holding a stale label rather than a
+    # season key. Repair it here, before the widget below is built -- after
+    # that, assigning to a widget key is an error.
+    season_key = season_lib.canonical(
         st.session_state.get("season", season_lib.KHARIF)
-    ][0]
+    )
+    if st.session_state.get("season") != season_key:
+        st.session_state["season"] = season_key
+    season_now = i18n.season_name(
+        season_key, season_lib.SEASONS[season_key][0],
+        current_language() if simple else i18n.ENGLISH,
+    )
     summary = (
-        f"📍 {current}  ·  {acres_now:g} acre"
-        + ("" if acres_now == 1 else "s")
-        + f"  ·  {season_now}"
+        f"📍 {current}  ·  {acres_now:g} {_acres_words(acres_now, simple)}"
+        f"  ·  {season_now}"
     )
     with st.expander(summary, expanded=False):
         bar = st.columns([1.3, 0.9, 1.1, 1.2], gap="medium")
@@ -935,7 +966,10 @@ def render_controls() -> Dict[str, object]:
         bar[2].selectbox(
             t_extra("when_sow", "When will you sow?") if simple else "Cropping season",
             options=season_keys,
-            format_func=lambda key: season_lib.SEASONS[key][0],
+            format_func=lambda key: i18n.season_name(
+                key, season_lib.SEASONS[key][0],
+                current_language() if simple else i18n.ENGLISH,
+            ),
             key="season",
             help=(
                 "A crop can suit your soil and still be wrong for the time of "
@@ -951,7 +985,8 @@ def render_controls() -> Dict[str, object]:
             climate = st.session_state.get("climate")
             if weather is not None and weather.is_live:
                 st.markdown(
-                    f"<div class='gr-wx live'><div class='k'>LIVE WEATHER</div>"
+                    f"<div class='gr-wx live'><div class='k'>"
+                    f"{t_extra('live_weather', 'LIVE WEATHER')}</div>"
                     f"<div class='v'>{weather.temperature:.0f}°C · "
                     f"{weather.humidity:.0f}% RH</div>"
                     f"<div class='s'>{weather.city}</div></div>",
@@ -959,11 +994,17 @@ def render_controls() -> Dict[str, object]:
                 )
             else:
                 where = getattr(climate, "district", district)
+                source = i18n.phrase(
+                    "weather_normals", f"normals for {where}",
+                    current_language() if simple else i18n.ENGLISH,
+                    district=where,
+                )
                 st.markdown(
-                    f"<div class='gr-wx'><div class='k'>TYPICAL WEATHER</div>"
+                    f"<div class='gr-wx'><div class='k'>"
+                    f"{t_extra('typical_weather', 'TYPICAL WEATHER')}</div>"
                     f"<div class='v'>{st.session_state['in_temperature']:.0f}°C · "
                     f"{st.session_state['in_humidity']:.0f}% RH</div>"
-                    f"<div class='s'>normals for {where}</div></div>",
+                    f"<div class='s'>{source}</div></div>",
                     unsafe_allow_html=True,
                 )
             if st.button(
@@ -985,14 +1026,23 @@ def render_controls() -> Dict[str, object]:
     baseline = st.session_state.get("baseline")
     if baseline is not None:
         provenance = (
-            f"Typical of {baseline.sample_count:,} soil tests from "
-            f"{baseline.district}."
+            i18n.phrase(
+                "soil_from_survey",
+                f"Typical of {baseline.sample_count:,} soil tests from "
+                f"{baseline.district}.",
+                current_language(),
+                district=baseline.district, count=f"{baseline.sample_count:,}",
+            )
             if baseline.is_survey_backed and simple
             else f"NFSM median of {baseline.sample_count:,} laboratory samples "
             f"from {baseline.district}."
             if baseline.is_survey_backed
-            else f"Typical soil for {baseline.district} — not from a survey, "
-            f"so correct it below if you have a soil card."
+            else i18n.phrase(
+                "soil_not_survey",
+                f"Typical soil for {baseline.district} — not from a survey, "
+                f"so correct it below if you have a soil card.",
+                current_language(), district=baseline.district,
+            )
             if simple
             else f"Curated agro-climatic baseline for {baseline.district} "
             f"(source: {baseline.source}); no survey samples for this unit."
@@ -1051,7 +1101,7 @@ def render_controls() -> Dict[str, object]:
         "city": district,
         "acres": float(acres),
         "features": values,
-        "season": st.session_state.get("season", season_lib.KHARIF),
+        "season": season_lib.canonical(st.session_state.get("season")),
     }
 
 
@@ -1144,11 +1194,26 @@ def render_reminders(simple: bool) -> None:
     st.markdown(
         f"#### {t_extra('whats_due', 'What to do next') if simple else 'Field calendar'}"
     )
+    language = current_language()
+    kannada = simple and language == i18n.KANNADA
     for item in due:
+        # The stage name and the action are the two halves a farmer acts on,
+        # so both are localised; the day offset is what the harvest line
+        # interpolates, and it is the gap between sowing and the due date.
+        offset = (item.due_on - item.saved_on).days
+        stage, action = i18n.stage_words(
+            item.stage, item.action, language if simple else i18n.ENGLISH,
+            day=offset,
+        )
+        crop = agronomy.kannada_name(item.crop) if kannada else item.crop.title()
+        when = i18n.when_words(
+            item.days_away, item.when_words(),
+            language if simple else i18n.ENGLISH,
+        )
         body = (
-            f"**{item.headline()}** — {item.when_words()}"
+            f"**{crop} — {stage}** — {when}"
             f"{('  ·  ' + item.district) if item.district else ''}  \n"
-            f"{item.action}"
+            f"{action}"
         )
         {"overdue": st.error, "now": st.warning}.get(item.urgency, st.info)(body)
 
@@ -1265,8 +1330,8 @@ def render_commercial_panel(state: Dict[str, object], simple: bool) -> None:
     )
 
     st.markdown(
-        f"#### {'What to buy from the shop' if simple else 'Commercial fertiliser plan'}"
-        f" — {acres:g} acre" + ("" if acres == 1 else "s")
+        f"#### {t_extra('what_to_buy', 'What to buy from the shop') if simple else 'Commercial fertiliser plan'}"
+        f" — {acres:g} {_acres_words(acres, simple)}"
     )
     if plan.is_empty:
         st.success(
@@ -1278,7 +1343,7 @@ def render_commercial_panel(state: Dict[str, object], simple: bool) -> None:
         for column, line in zip(bags, plan.lines):
             column.metric(
                 f"{line.product}",
-                f"{line.whole_bags} bag" + ("" if line.whole_bags == 1 else "s"),
+                f"{line.whole_bags} {_bags_word(line.whole_bags, simple)}",
             )
             column.caption(f"{line.grade} · {line.kg:.0f} kg")
         if plan.nitrogen_from_dap_kg > 0:
@@ -1414,16 +1479,16 @@ def render_recommendation_tab(state: Dict[str, object]) -> None:
         if simple:
             st.caption(band.detail)
 
-        season = str(state.get("season") or season_lib.KHARIF)
+        season = season_lib.canonical(state.get("season"))
         fit = season_lib.assess(prediction.crop, season)
         if not fit.suitable:
-            st.error(f"📅 **{tr('season_clash', simple)}** — {fit.message(simple)}")
+            st.error(f"📅 **{tr('season_clash', simple)}** — {fit.message(simple, current_language())}")
         elif fit.is_perennial:
             # Not silence: "the season does not apply here" is itself the
             # answer, and leaving it out looks like the check never ran.
-            st.info(f"📅 {fit.message(simple)}")
+            st.info(f"📅 {fit.message(simple, current_language())}")
         else:
-            st.success(f"📅 {fit.message(simple)}")
+            st.success(f"📅 {fit.message(simple, current_language())}")
 
         if prediction.is_low_confidence:
             st.warning(tr("low_confidence", simple))

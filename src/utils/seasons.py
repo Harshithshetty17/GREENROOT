@@ -118,8 +118,49 @@ class SeasonFit:
             return names[0]
         return ", ".join(names[:-1]) + " or " + names[-1]
 
-    def message(self, simple: bool = True) -> str:
-        """Return the advice line for this fit."""
+    def sowable_labels_in(self, language: str = "en") -> str:
+        """Seasons this crop suits, named in the given language."""
+        from src.utils.i18n import season_name
+
+        names = [
+            season_name(s, SEASONS.get(s, (s, ""))[0].split(" (")[0], language)
+            for s in self.sowable_in
+        ]
+        if not names:
+            return "no recorded season"
+        if len(names) == 1:
+            return names[0]
+        joiner = " ಅಥವಾ " if language == "kn" else " or "
+        return ", ".join(names[:-1]) + joiner + names[-1]
+
+    def message(self, simple: bool = True, language: str = "en") -> str:
+        """Return the advice line for this fit.
+
+        The Kannada versions are whole sentences rather than translated
+        fragments assembled in English order -- Kannada puts the verb last,
+        so building one from parts would read as nonsense.
+        """
+        if simple and language == "kn":
+            from src.utils.agronomy import kannada_name
+            from src.utils.i18n import season_message, season_name
+
+            crop_kn = kannada_name(self.crop).split(" (")[0]
+            kind = (
+                "perennial" if self.is_perennial
+                else "suitable" if self.suitable
+                else "clash"
+            )
+            rendered = season_message(
+                kind,
+                language,
+                crop=crop_kn,
+                season=season_name(
+                    self.season, self.season_label.split(" (")[0], language),
+                seasons=self.sowable_labels_in(language),
+            )
+            if rendered:
+                return rendered
+
         if self.is_perennial:
             return (
                 f"{self.crop.capitalize()} is a long-term crop — you plant it "
@@ -183,6 +224,37 @@ def assess(crop: str, season: str) -> SeasonFit:
     )
 
 
+def canonical(value: object, *, fallback: str = KHARIF) -> str:
+    """Map anything that names a season back onto its key.
+
+    Streamlit stores a ``selectbox``'s value as the string its ``format_func``
+    produced, and restores it by looking that string back up among the
+    formatted options. Change the interface language and the lookup misses --
+    the stored label was formatted under the old language -- at which point
+    Streamlit hands back the raw label instead of the option, and
+    ``st.session_state["season"]`` holds ``"Rabi (winter)"`` or ``ಹಿಂಗಾರು``
+    where every reader downstream expects ``"rabi"``.
+
+    So a label is accepted here as well as a key: the English name with or
+    without its parenthetical gloss, the Kannada name, or the key in any
+    case. Anything unrecognised falls back rather than raising, because the
+    caller is usually about to index :data:`SEASONS` with the result and a
+    ``KeyError`` there takes the whole page down.
+    """
+    from src.utils.i18n import KANNADA, season_name
+
+    if isinstance(value, str):
+        text = value.strip()
+        lowered = text.lower()
+        if lowered in SEASONS:
+            return lowered
+        for key, (english, _) in SEASONS.items():
+            if text in (english, english.split(" (")[0],
+                        season_name(key, english, KANNADA)):
+                return key
+    return fallback
+
+
 def default_season(month: int) -> str:
     """Suggest the season whose sowing window contains ``month``.
 
@@ -214,5 +286,5 @@ __all__ = [
     "KHARIF", "RABI", "SUMMER", "PERENNIAL",
     "SEASONS", "CROP_SEASONS", "SeasonFit",
     "assess", "seasons_for", "is_perennial",
-    "default_season", "filter_sowable", "coverage",
+    "canonical", "default_season", "filter_sowable", "coverage",
 ]

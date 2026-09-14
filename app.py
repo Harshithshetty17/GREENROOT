@@ -1132,9 +1132,11 @@ def render_empty_state(simple: bool) -> None:
     """
     steps = (
         [
-            ("Check your readings", "The six numbers above describe your land. "
-             "Change the district at the top, or open the soil card "
-             "expander to correct them."),
+            # Name the control by the words printed on it. "The soil card
+            # expander" is what it is called in the source, not on screen.
+            ("Check your readings", "The numbers above describe your land. "
+             "Change the district at the top, or tap \u201cChange my soil "
+             "readings\u201d to correct them yourself."),
             ("Press the green button", "GREENROOT weighs your soil against "
              "22 crops and picks the one that fits best."),
             ("See why, not just what", "It shows which reading decided it, "
@@ -1310,11 +1312,25 @@ def render_commercial_panel(state: Dict[str, object], simple: bool) -> None:
         f"{_rupees(crop_profile.price_per_quintal)}/qtl",
         help="Edit this above if you know your own mandi's rate.",
     )
+    # A loss gets its own label and an unsigned figure. "Money left over:
+    # -20,000" is a contradiction, and on a phone the minus sign is one thin
+    # stroke in front of a large number -- the reading a farmer is most
+    # likely to take from it is the exact opposite of what it means.
     roi[2].metric(
-        t_extra("money_left", "Money left over") if simple else "Net margin",
-        _rupees(money.net),
+        (t_extra("money_short", "Money you would lose") if simple
+         else "Net margin (loss)")
+        if money.is_loss
+        else t_extra("money_left", "Money left over") if simple
+        else "Net margin",
+        _rupees(abs(money.net)) if money.is_loss else _rupees(money.net),
     )
-    roi[2].caption(f"after {_rupees(money.cost)} of costs")
+    roi[2].caption(
+        (t_extra("after_costs_loss", "more than this crop brings in")
+         if simple else f"against {_rupees(money.cost)} of costs")
+        if money.is_loss
+        else (t_extra("after_costs", "after costs") if simple
+              else f"after {_rupees(money.cost)} of costs")
+    )
 
     if money.is_loss:
         st.warning(
@@ -2633,6 +2649,15 @@ def main() -> None:
 
     st.sidebar.markdown("### GREENROOT")
 
+    # Both of these render nothing; they run here for their order alone.
+    # ensure_database() must precede current_user(), which reads the sessions
+    # table, and _adopt_stored_language() writes the ui_language key -- which
+    # Streamlit forbids once the radio bound to that key exists. Called after
+    # the picker, as it used to be, every sign-in and every account creation
+    # ended in StreamlitWidgetAlreadyInstantiatedError and a page of red.
+    ensure_database()
+    _adopt_stored_language()
+
     # Above the account panel and outside it: a guest must be able to change
     # language without signing up.
     render_language_picker()
@@ -2652,10 +2677,6 @@ def main() -> None:
         else "Turn this on to see how the model reached its answer."
     )
 
-    # Must precede the account panel: that panel reads the users and
-    # sessions tables, which do not exist until the schema is initialised.
-    ensure_database()
-    _adopt_stored_language()
     render_account_sidebar(is_simple())
     render_help_sidebar()
     inputs = render_controls()

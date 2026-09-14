@@ -169,6 +169,9 @@ KANNADA_EXTRA: Dict[str, str] = {
         "ಏನಾದರೂ ಬದಲಾಯಿತೇ? ಮೇಲೆ ನಿಮ್ಮ ಅಳತೆ ಸರಿಪಡಿಸಿ, ನಂತರ ಮತ್ತೆ ಒತ್ತಿ."
     ),
     "whats_due": "ಮುಂದೆ ಏನು ಮಾಡಬೇಕು",
+    "money_short": "ನಷ್ಟವಾಗುವ ಹಣ",
+    "after_costs": "ಖರ್ಚು ಕಳೆದ ನಂತರ",
+    "after_costs_loss": "ಈ ಬೆಳೆಯಿಂದ ಬರುವುದಕ್ಕಿಂತ ಹೆಚ್ಚು",
     "advice_saved_count": "ಉಳಿಸಿದ ಸಲಹೆಗಳು",
     "average_match": "ಸರಾಸರಿ ಹೊಂದಾಣಿಕೆ",
     "different_crops": "ಬೇರೆ ಬೇರೆ ಬೆಳೆಗಳು",

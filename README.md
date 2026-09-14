@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![scikit--learn](https://img.shields.io/badge/scikit--learn-1.9.0-orange)
-![Tests](https://img.shields.io/badge/tests-313%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-323%20passed-brightgreen)
 ![CV Accuracy](https://img.shields.io/badge/5--fold%20CV-99.41%25-brightgreen)
 
 A decision support system that recommends one of 22 crops from seven agronomic
@@ -589,6 +589,12 @@ browser with both devices on the same Wi-Fi. For a public link that works
 anywhere, see **[PHONE.md](PHONE.md)**, which also covers the firewall prompt,
 networks that block device-to-device traffic, and Streamlit Cloud deployment.
 
+The dashboard ships a web-app manifest, so **Add to Home screen** installs it
+with its own icon and opens full-screen with no address bar. An Android WebView
+project is in [`android/`](android/) if you want an actual `.apk` — it has not
+been compiled here, and `android/README.md` is honest about why a WebView
+wrapper is a poor Play Store candidate.
+
 ### Optional: live weather
 
 ```bash
@@ -627,6 +633,8 @@ GREENROOT/
 ├── run.bat                     One-click Windows launcher
 ├── run_phone.bat / .sh         Serve to a phone on the same Wi-Fi
 ├── PHONE.md                    Phone setup and deployment guide
+├── android/                    Android WebView shell (APK, unbuilt)
+├── assets/                     App icons for home-screen install
 ├── requirements.txt
 │
 ├── data/                       Source corpora (read-only)
@@ -639,6 +647,7 @@ GREENROOT/
 ├── src/
 │   ├── core/config.py              Paths, feature contract, safety bounds
 │   ├── core/theme.py               Design tokens; CVD-validated chart palette
+│   ├── core/pwa.py                 Web-app manifest: installs to home screen
 │   ├── database/db_manager.py      Thread-safe SQLite, WAL, migrations
 │   ├── services/
 │   │   ├── weather_service.py      OWM client: timeout, cache, offline mock
@@ -656,7 +665,7 @@ GREENROOT/
 │       ├── plain_language.py       Farmer register, bag/acre units
 │       └── report_generator.py     PDF / HTML / Markdown / text health card
 │
-└── tests/                      313 tests, 1 environment-conditional skip
+└── tests/                      323 tests, 1 environment-conditional skip
     ├── test_models.py              Validation, calibration, sweep, Jaccard
     ├── test_services.py            Mocked transports, district resolution
     ├── test_database.py            CRUD, migration, rollback, concurrency
@@ -703,10 +712,10 @@ tests/test_batch.py                 ......................  54 passed
 tests/test_decision_support.py      ......................  47 passed
 tests/test_database.py              ......................  44 passed
 tests/test_models.py                ......................  72 passed
-tests/test_presentation.py          ......................  37 passed
+tests/test_presentation.py          ......................  47 passed
 tests/test_services.py              ......................  42 passed, 1 skipped
 tests/test_validation_statistics.py ......................  17 passed
-============== 313 passed, 1 skipped in 4.89s ==============
+============== 323 passed, 1 skipped in 5.1s ==============
 ```
 
 Coverage of note:

@@ -38,6 +38,7 @@ from src.core.config import (
     OOD_ZSCORE_THRESHOLD,
     REPORTED_CV_ACCURACY,
 )
+from src.core.pwa import install as install_pwa
 from src.core.theme import (
     BRAND,
     DIVERGING_HIGH,
@@ -1520,6 +1521,10 @@ def render_card_tab(state: Dict[str, object]) -> None:
 # --------------------------------------------------------------------------- #
 def main() -> None:
     """Assemble the dashboard."""
+    # Makes "Add to Home screen" produce a full-screen app with its own icon.
+    # Purely cosmetic — if it fails the dashboard is unaffected.
+    install_pwa(st)
+
     recommender = load_recommender()
     if recommender is None:
         st.stop()

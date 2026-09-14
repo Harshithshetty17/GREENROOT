@@ -26,6 +26,8 @@ matplotlib>=3.8
 # openpyxl: lets the bulk-advisory tab accept .xlsx survey sheets.
 fpdf2>=2.7
 openpyxl>=3.1
+# pillow: generates and verifies the home-screen app icons.
+pillow>=10.0
 
 # --- Services --------------------------------------------------------------
 requests>=2.31

@@ -222,3 +222,79 @@ class TestAdvisoryRegisters:
                 assert word not in item.plain.lower(), (
                     f"{item.category} plain text uses {word!r}"
                 )
+
+
+class TestInstallablePwa:
+    """The home-screen install path: manifest shape and icon integrity."""
+
+    def test_manifest_is_built(self) -> None:
+        from src.core.pwa import build_manifest
+
+        manifest = build_manifest()
+        assert manifest is not None, "icons missing from assets/"
+
+    def test_manifest_declares_standalone_display(self) -> None:
+        """Without this the shortcut opens in a browser tab, not as an app."""
+        from src.core.pwa import build_manifest
+
+        assert build_manifest()["display"] == "standalone"
+
+    def test_manifest_has_required_fields(self) -> None:
+        from src.core.pwa import build_manifest
+
+        manifest = build_manifest()
+        for key in ("name", "short_name", "start_url", "icons", "theme_color"):
+            assert manifest.get(key), f"manifest is missing {key}"
+
+    def test_icons_cover_the_sizes_android_asks_for(self) -> None:
+        from src.core.pwa import build_manifest
+
+        sizes = {icon["sizes"] for icon in build_manifest()["icons"]}
+        assert {"192x192", "512x512"} <= sizes
+
+    def test_a_maskable_icon_is_provided(self) -> None:
+        """Android crops to a circle; without this the art gets clipped."""
+        from src.core.pwa import build_manifest
+
+        assert any(i["purpose"] == "maskable" for i in build_manifest()["icons"])
+
+    def test_icons_are_embedded_not_linked(self) -> None:
+        """Data URIs survive Streamlit Cloud, which serves no static assets."""
+        from src.core.pwa import build_manifest
+
+        for icon in build_manifest()["icons"]:
+            assert icon["src"].startswith("data:image/png;base64,")
+
+    def test_icon_files_are_real_pngs_of_the_right_size(self) -> None:
+        from PIL import Image
+
+        from src.core.pwa import ASSETS_DIR
+
+        for filename, expected in (
+            ("icon-192.png", 192),
+            ("icon-512.png", 512),
+            ("icon-maskable-512.png", 512),
+        ):
+            with Image.open(ASSETS_DIR / filename) as image:
+                assert image.format == "PNG"
+                assert image.size == (expected, expected), filename
+
+    def test_theme_colour_matches_the_brand(self) -> None:
+        from src.core.theme import BRAND
+        from src.core.pwa import THEME_COLOUR, build_manifest
+
+        assert THEME_COLOUR.lower() == BRAND.lower()
+        assert build_manifest()["theme_color"].lower() == BRAND.lower()
+
+    def test_injection_script_is_produced(self) -> None:
+        from src.core.pwa import head_injection_script
+
+        script = head_injection_script()
+        assert script and "application/manifest+json" in script
+        assert "apple-touch-icon" in script
+
+    def test_injection_failure_cannot_break_the_app(self) -> None:
+        """Installability is cosmetic; install() must never raise."""
+        from src.core import pwa
+
+        assert pwa.install(None) in (True, False)

@@ -108,14 +108,44 @@ phone without your computer running.
 
 ---
 
-## Adding it to the phone's home screen
+## Option 3 — Install it to the home screen (looks like an app)
 
-Either option gives you something that behaves like an app:
+The dashboard ships a web-app manifest, so a phone will install it properly
+rather than leaving a browser bookmark:
 
-- **Android (Chrome):** ⋮ menu → **Add to Home screen**.
-- **iPhone (Safari):** Share → **Add to Home Screen**.
+- **Android (Chrome):** ⋮ menu → **Install app** (or *Add to Home screen*)
+- **iPhone (Safari):** Share → **Add to Home Screen**
 
-It then opens full-screen with no browser bar.
+You get the GreenRoot seedling icon in your launcher, and it opens full-screen
+with no address bar, under its own name. For a demo this is indistinguishable
+from an installed app, and it costs nothing.
+
+It still needs a connection — the model runs on the server, so there is no
+useful offline mode.
+
+---
+
+## Option 4 — A real APK, and the Play Store
+
+An Android project is included in **[`android/`](android/)**. Point it at your
+deployed URL, open it in Android Studio, and **Build → Build APK(s)** produces
+an installable `.apk` you can put on any Android phone.
+
+> That project has **never been compiled** — no Android SDK was available where
+> it was written. It is standard boilerplate and should build, but budget time
+> to fix a small issue or two.
+
+**About the Play Store specifically.** It is possible but not straightforward:
+
+- A Google Play Developer account costs **US$25** (one time)
+- Review takes days
+- **Google routinely rejects WebView wrappers** under the minimum-functionality
+  policy — an app whose only content is a website. Passing usually requires
+  real native value: offline use, push notifications, camera or GPS
+
+For a capstone, Option 3 gives you the look of an installed app in thirty
+seconds, and the APK in `android/` gives you something you can physically
+install on a panel member's phone. Neither needs a store listing.
 
 ---
 

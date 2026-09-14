@@ -2,7 +2,7 @@
 
 ### Intelligent Precision Agriculture Decision Support System via Stacking Ensemble Meta-Learning and Multi-Explainer Consensus Auditing
 
-![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![scikit--learn](https://img.shields.io/badge/scikit--learn-1.9.0-orange)
 ![Tests](https://img.shields.io/badge/tests-313%20passed-brightgreen)
 ![CV Accuracy](https://img.shields.io/badge/5--fold%20CV-99.41%25-brightgreen)

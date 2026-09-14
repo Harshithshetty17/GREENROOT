@@ -1,5 +1,6 @@
 # GREENROOT — Intelligent Precision Agriculture Decision Support System
-# Python 3.10+  ·  install with:  pip install -r requirements.txt
+# Python 3.12+ required — shap declares >=3.12 and scikit-learn 1.9 >=3.11.
+# Install with:  pip install -r requirements.txt
 
 # --- Core scientific stack -------------------------------------------------
 # scikit-learn is pinned exactly: the artefacts in models/ were serialised

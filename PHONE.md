@@ -87,11 +87,15 @@ phone without your computer running.
 
 - **`requirements.txt` is already correct** — every third-party import in the
   project is declared, verified by an import audit.
+- **Set the Python version to 3.12 or 3.13.** In the deploy dialog open
+  **Advanced settings** and choose it there. This matters: `shap` declares
+  `requires_python >=3.12` and `scikit-learn` 1.9 declares `>=3.11`, so a
+  build on 3.11 or older fails while installing. Checked against PyPI —
+  scikit-learn 1.9.0 publishes wheels for cp311 through cp314.
 - **`scikit-learn` is pinned to 1.9.0** on purpose: the artefacts in `models/`
-  were serialised under that version. If Cloud's Python version has no wheel
-  for it, add a `runtime.txt` containing `3.11` (or whichever version does),
-  rather than relaxing the pin — unpickling across a minor version can change
-  behaviour silently.
+  were serialised under that version. If a build fails, raise the Python
+  version rather than relaxing the pin — unpickling an estimator across a
+  minor version can change behaviour silently.
 - **The audit ledger resets on restart.** Streamlit Cloud gives each app an
   ephemeral filesystem, so `crop_recommendations.db` is wiped when the app
   sleeps or redeploys. Saved recommendations are not lost during a session,

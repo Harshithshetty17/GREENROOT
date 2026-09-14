@@ -60,9 +60,53 @@ _DISTRICT_COLUMN: str = "taluku"
 KARNATAKA_FALLBACK: Dict[str, Dict[str, float]] = {
     "Udupi": {"N": 210.0, "P": 24.0, "K": 130.0, "ph": 5.8},
     "Dakshina Kannada": {"N": 205.0, "P": 22.0, "K": 125.0, "ph": 5.6},
+    "Shivamogga": {"N": 200.0, "P": 25.0, "K": 160.0, "ph": 6.0},
     "Mysuru": {"N": 195.0, "P": 30.0, "K": 210.0, "ph": 6.8},
     "Dharwad": {"N": 185.0, "P": 28.0, "K": 250.0, "ph": 7.6},
     "Bengaluru Rural": {"N": 190.0, "P": 26.0, "K": 190.0, "ph": 6.4},
+}
+
+#: Districts that answer to a second commonly used spelling. Shimoga was
+#: renamed Shivamogga in 2014 and both are still in daily use, so a farmer
+#: typing either must land on the same baseline.
+DISTRICT_ALIASES: Dict[str, str] = {
+    "shimoga": "Shivamogga",
+    "mysore": "Mysuru",
+    "bangalore rural": "Bengaluru Rural",
+    "mangalore": "Dakshina Kannada",
+}
+
+#: Climate normals per district: monsoon-season temperature, relative humidity
+#: and rainfall.
+#:
+#: **These do not come from the NFSM export.** That file is a soil laboratory
+#: survey and carries no climate columns at all -- only N, P, K and pH can be
+#: derived from it. These are representative regional normals for the
+#: Karnataka agro-climatic zones, chosen to sit inside the training
+#: distribution of ``Crop_recommendation.csv`` (rainfall 20-299 mm, humidity
+#: 14-100%, temperature 9-44 C), so that loading a district never pushes the
+#: model straight out of the manifold it was fitted on.
+#:
+#: They are a starting point for a farmer who has not measured their own, and
+#: the dashboard says so wherever they are shown. A live reading from
+#: :mod:`src.services.weather_service` supersedes them when one is available.
+KARNATAKA_CLIMATE: Dict[str, Dict[str, float]] = {
+    # Coastal: heavy south-west monsoon, humid year round.
+    "Udupi": {"temperature": 27.0, "humidity": 85.0, "rainfall": 240.0},
+    "Dakshina Kannada": {"temperature": 27.5, "humidity": 86.0, "rainfall": 250.0},
+    # Malnad transition: high rainfall, cooler.
+    "Shivamogga": {"temperature": 25.0, "humidity": 78.0, "rainfall": 180.0},
+    # Southern dry zone.
+    "Mysuru": {"temperature": 25.0, "humidity": 68.0, "rainfall": 95.0},
+    # Eastern dry zone, on the Deccan plateau.
+    "Bengaluru Rural": {"temperature": 24.0, "humidity": 65.0, "rainfall": 90.0},
+    # Northern transition, black cotton country.
+    "Dharwad": {"temperature": 25.5, "humidity": 62.0, "rainfall": 80.0},
+}
+
+#: Fallback climate, the central tendency of the training set itself.
+_CLIMATE_COMPOSITE: Dict[str, float] = {
+    "temperature": 25.6, "humidity": 71.5, "rainfall": 103.5,
 }
 
 #: Neutral state-level composite, used when nothing else resolves.
@@ -225,6 +269,9 @@ def get_district_baseline(district_name: str) -> SoilBaseline:
         query resolved.
     """
     query = _normalise(district_name)
+    # A renamed district must not resolve differently from its old name:
+    # "Shimoga" and "Shivamogga" are the same place and both are still used.
+    query = _normalise(DISTRICT_ALIASES.get(query, query))
     survey = _baselines()
 
     if query:
@@ -281,9 +328,82 @@ def refresh_cache() -> None:
     _baselines(refresh=True)
 
 
+@dataclass(frozen=True)
+class ClimateNormal:
+    """A district's representative monsoon-season climate.
+
+    Attributes
+    ----------
+    district:
+        Canonical district the values were resolved for.
+    temperature, humidity, rainfall:
+        Degrees Celsius, percent, and millimetres.
+    source:
+        ``'normal'`` for a curated district figure, ``'default'`` for the
+        training-set composite. Never ``'api'`` -- a live reading comes from
+        :mod:`src.services.weather_service`, not from here.
+    """
+
+    district: str
+    temperature: float
+    humidity: float
+    rainfall: float
+    source: str = "normal"
+
+    @property
+    def is_district_specific(self) -> bool:
+        return self.source == "normal"
+
+    def as_dict(self) -> Dict[str, float]:
+        return {
+            "temperature": self.temperature,
+            "humidity": self.humidity,
+            "rainfall": self.rainfall,
+        }
+
+
+def get_district_climate(district_name: str) -> ClimateNormal:
+    """Resolve a district to its climate normals.
+
+    Separate from :func:`get_district_baseline` because the provenance is
+    different and the difference matters: the soil values can be empirical
+    medians from the shipped survey, while these are always curated regional
+    normals. The NFSM export has no climate columns to derive them from.
+    """
+    query = _normalise(district_name)
+    query = _normalise(DISTRICT_ALIASES.get(query, query))
+
+    if query:
+        for name, values in KARNATAKA_CLIMATE.items():
+            key = _normalise(name)
+            if key == query or query in key or key in query:
+                return ClimateNormal(district=name, source="normal", **values)
+
+    return ClimateNormal(
+        district=_titlecase(district_name) if query else "Karnataka",
+        source="default",
+        **_CLIMATE_COMPOSITE,
+    )
+
+
+def district_profile(district_name: str) -> Dict[str, float]:
+    """All seven model features for a district, in one call.
+
+    This is what the dashboard's one-tap district selector uses.
+    """
+    baseline = get_district_baseline(district_name)
+    climate = get_district_climate(district_name)
+    return {**baseline.as_dict(), **climate.as_dict()}
+
+
 __all__ = [
     "SoilBaseline",
     "KARNATAKA_FALLBACK",
+    "KARNATAKA_CLIMATE",
+    "DISTRICT_ALIASES",
+    "ClimateNormal",
+    "get_district_climate",
+    "district_profile",
     "get_district_baseline",
     "list_districts",
     "refresh_cache",

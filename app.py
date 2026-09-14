@@ -39,6 +39,11 @@ from src.core.config import (
     REPORTED_CV_ACCURACY,
 )
 from src.core import native
+from src.services.soil_service import (
+    district_profile,
+    get_district_climate,
+)
+from src.utils import agronomy
 from src.core.pwa import install as install_pwa
 from src.core.theme import (
     BRAND,
@@ -51,7 +56,7 @@ from src.core.theme import (
     series_palette,
     style_axes,
 )
-from src.database import db_manager
+from src.database import db, db_manager
 from src.models.batch import BatchProcessor, BatchResult, MAX_BATCH_ROWS, build_template
 from src.models.inference import CropRecommender, ValidationError
 from src.models.xai_engine import ExplainerConsensus
@@ -198,7 +203,21 @@ _CSS = """
     font-size: 38px; font-weight: 750; color: #14603c; text-transform: uppercase;
     letter-spacing: .4px; line-height: 1.1; margin: 4px 0 2px;
   }
+  .gr-primary .kn { font-size: 20px; font-weight: 600; color: #1f7a4d;
+                    line-height: 1.3; margin: 0 0 6px; }
   .gr-primary .conf { font-size: 14.5px; color: #3d5548; font-weight: 500; }
+
+  /* Top control bar: the only things most people ever touch. */
+  .gr-controls { margin-bottom: 2px; }
+  .gr-wx { border: 1px solid #dfe8e2; border-radius: 10px; padding: 7px 12px;
+           background: #f4f8f5; margin-bottom: 6px; }
+  .gr-wx.live { background: #e7f2eb; border-color: #b9d8c6; }
+  .gr-wx .k { font-size: 10px; letter-spacing: .7px; font-weight: 700;
+              color: #5c6f63; }
+  .gr-wx.live .k { color: #14603c; }
+  .gr-wx .v { font-size: 16px; font-weight: 700; color: #14281d;
+              line-height: 1.25; }
+  .gr-wx .s { font-size: 11px; color: #5c6f63; }
 
   /* ---- Badges & metrics ----------------------------------------------- */
   .gr-badge {
@@ -391,8 +410,14 @@ def _style_axes(axes: plt.Axes, *, grid_axis: str = "x") -> None:
 
 
 def is_simple() -> bool:
-    """``True`` when the dashboard is in farmer-facing plain-language mode."""
-    return bool(st.session_state.get("simple_mode", True))
+    """Whether to address the reader as a farmer rather than an examiner.
+
+    One switch drives both personas: the farmer portal is plain-language mode,
+    and Examiner / AI Mode is its inverse. Keeping it as a single derived
+    predicate means every ``simple``-conditioned string in this file keeps
+    working unchanged.
+    """
+    return not bool(st.session_state.get("examiner_mode", False))
 
 
 def _feature_word(feature: str, simple: bool = True) -> str:
@@ -419,161 +444,198 @@ def _seed_defaults() -> None:
         st.session_state.setdefault(f"in_{name}", float(default))
 
 
-def render_sidebar() -> Dict[str, object]:
-    """Collect every model input. Returns the raw feature dict plus context."""
+def _apply_district(district: str) -> None:
+    """Load a district's full seven-feature profile into the input widgets.
+
+    Wired to the selector's ``on_change`` so that choosing a district *is* the
+    load -- the previous design needed a separate "load baseline" press, which
+    meant the readings on screen could silently disagree with the district
+    named beside them.
+    """
+    baseline = get_district_baseline(district)
+    climate = get_district_climate(district)
+    st.session_state["baseline"] = baseline
+    st.session_state["climate"] = climate
+    for key, value in district_profile(district).items():
+        st.session_state[f"in_{key}"] = float(np.clip(value, *FEATURE_BOUNDS[key]))
+    # A district load supersedes any earlier live reading.
+    st.session_state.pop("weather", None)
+
+
+def _on_district_change() -> None:
+    _apply_district(st.session_state.get("district_pick", ""))
+
+
+def render_controls() -> Dict[str, object]:
+    """The top control bar, in the main area rather than the sidebar.
+
+    A farmer on a phone never opens the sidebar. Everything that has to be
+    touched on a normal run -- where the land is, how big it is, what the
+    weather is doing -- lives here; the seven raw readings stay one tap away
+    in an expander, because most people will accept the district baseline.
+    """
     _seed_defaults()
-
-    # Farmers are the primary users, so plain language is the default; the
-    # technical register stays one click away rather than being removed.
-    st.sidebar.toggle(
-        "Simple words",
-        value=True,
-        key="simple_mode",
-        help="Off shows the technical wording used in the project report.",
-    )
     simple = is_simple()
-    st.sidebar.markdown("---")
-    st.sidebar.markdown(f"### {tr('sidebar_place', simple)}")
-
     districts = cached_districts()
-    district = st.sidebar.selectbox(
-        tr("district", simple),
-        options=districts,
-        index=districts.index("Udupi") if "Udupi" in districts else 0,
-        help=(
-            "We use typical soil readings from your area to fill in the form."
-            if simple
-            else "Selects the NFSM laboratory baseline used to pre-fill soil "
-            "chemistry."
-        ),
-    )
 
-    city = st.sidebar.text_input(
-        "Nearest town" if simple else "Weather station / City", value=district
-    )
-    api_key = st.sidebar.text_input(
-        "Weather key (optional)" if simple else "OpenWeatherMap API key",
-        type="password",
-        help=(
-            "Leave this empty if you do not have one — the app still works."
-            if simple
-            else "Optional. Without a key the system uses calibrated offline "
-            "defaults."
-        ),
-    )
-
-    if st.sidebar.button(tr("get_weather", simple), width="stretch"):
-        reading = get_weather(city, api_key or None)
-        st.session_state["weather"] = reading
-        for key, value in reading.as_dict().items():
-            st.session_state[f"in_{key}"] = float(
-                np.clip(value, *FEATURE_BOUNDS[key])
-            )
-
-    weather = st.session_state.get("weather")
-    if weather is not None:
-        if weather.is_live:
-            st.sidebar.success(
-                f"Live · {weather.city} · {weather.temperature:.1f} °C · "
-                f"{weather.humidity:.0f} % RH"
-            )
-        else:
-            st.sidebar.info(
-                "Using typical weather for your area."
-                if simple
-                else f"Offline defaults — {weather.message}"
-            )
-
-    st.sidebar.markdown("---")
-    st.sidebar.markdown(f"### {tr('sidebar_soil', simple)}")
-
-    if st.sidebar.button(tr("load_baseline", simple), width="stretch"):
-        baseline = get_district_baseline(district)
-        st.session_state["baseline"] = baseline
-        for key, value in baseline.as_dict().items():
-            st.session_state[f"in_{key}"] = float(np.clip(value, *FEATURE_BOUNDS[key]))
-
-    baseline = st.session_state.get("baseline")
-    if baseline is not None:
-        if baseline.is_survey_backed:
-            st.sidebar.caption(
-                f"Typical of {baseline.sample_count:,} soil tests from "
-                f"{baseline.district}."
-                if simple
-                else f"NFSM median of {baseline.sample_count:,} laboratory "
-                f"samples from {baseline.district}."
-            )
-        else:
-            st.sidebar.caption(
-                f"Typical soil for {baseline.district}."
-                if simple
-                else f"Curated agro-climatic baseline for {baseline.district} "
-                f"(source: {baseline.source})."
-            )
-
-    values: Dict[str, float] = {}
-    for name in ("N", "P", "K"):
-        low, high = FEATURE_BOUNDS[name]
-        index = FEATURE_NAMES.index(name)
-        values[name] = st.sidebar.number_input(
-            tr(f"field_{name}", simple)
-            if simple
-            else f"{FEATURE_LABELS[index]} ({FEATURE_UNITS[index]})",
-            min_value=float(low),
-            max_value=float(high),
-            step=1.0,
-            key=f"in_{name}",
-            help=f"Measured in {FEATURE_UNITS[index]}." if simple else None,
+    if "district_pick" not in st.session_state:
+        st.session_state["district_pick"] = (
+            "Udupi" if "Udupi" in districts else districts[0]
         )
+        _apply_district(st.session_state["district_pick"])
 
-    values["ph"] = st.sidebar.number_input(
-        tr("field_ph", simple),
-        min_value=float(FEATURE_BOUNDS["ph"][0]),
-        max_value=float(FEATURE_BOUNDS["ph"][1]),
-        step=0.1,
-        key="in_ph",
+    st.markdown('<div class="gr-controls">', unsafe_allow_html=True)
+    bar = st.columns([1.3, 0.9, 1.1, 1.2], gap="medium")
+
+    district = bar[0].selectbox(
+        "Your district" if simple else "District",
+        options=districts,
+        key="district_pick",
+        on_change=_on_district_change,
+        help=(
+            "Picking your district fills in the typical soil and weather for "
+            "that area."
+            if simple
+            else "Loads the NFSM survey median where one exists, otherwise "
+            "the curated agro-climatic baseline, plus regional climate "
+            "normals."
+        ),
     )
 
-    st.sidebar.markdown(f"### {tr('sidebar_season', simple)}")
+    acres = bar[1].number_input(
+        "How many acres?" if simple else "Area (acres)",
+        min_value=0.1,
+        max_value=1000.0,
+        value=float(st.session_state.get("acres", 1.0)),
+        step=0.5,
+        key="acres",
+        help="Fertiliser bags and the money estimate are worked out for this "
+             "area.",
+    )
+
     season_keys = list(season_lib.SEASONS)
-    st.sidebar.selectbox(
+    if "season" not in st.session_state:
+        st.session_state["season"] = season_lib.default_season(date.today().month)
+    bar[2].selectbox(
         "When will you sow?" if simple else "Cropping season",
         options=season_keys,
-        index=season_keys.index(season_lib.default_season(date.today().month)),
         format_func=lambda key: season_lib.SEASONS[key][0],
         key="season",
         help=(
             "A crop can suit your soil and still be wrong for the time of "
             "year. We check both."
             if simple
-            else "Sowing window; used to flag calendar mismatches that the "
-            "edaphic model cannot see."
+            else "Sowing window; used to flag calendar mismatches the edaphic "
+            "model cannot see."
         ),
     )
-    st.sidebar.caption(season_lib.SEASONS[st.session_state["season"]][1])
 
-    st.sidebar.markdown(f"### {tr('sidebar_weather', simple)}")
-    for name in ("temperature", "humidity", "rainfall"):
-        low, high = FEATURE_BOUNDS[name]
-        index = FEATURE_NAMES.index(name)
-        values[name] = st.sidebar.slider(
-            f"{tr(f'field_{name}', simple)} ({FEATURE_UNITS[index]})",
-            min_value=float(low),
-            max_value=float(high),
-            step=0.5,
-            key=f"in_{name}",
+    with bar[3]:
+        weather = st.session_state.get("weather")
+        climate = st.session_state.get("climate")
+        if weather is not None and weather.is_live:
+            st.markdown(
+                f"<div class='gr-wx live'><div class='k'>LIVE WEATHER</div>"
+                f"<div class='v'>{weather.temperature:.0f}°C · "
+                f"{weather.humidity:.0f}% RH</div>"
+                f"<div class='s'>{weather.city}</div></div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            where = getattr(climate, "district", district)
+            st.markdown(
+                f"<div class='gr-wx'><div class='k'>TYPICAL WEATHER</div>"
+                f"<div class='v'>{st.session_state['in_temperature']:.0f}°C · "
+                f"{st.session_state['in_humidity']:.0f}% RH</div>"
+                f"<div class='s'>normals for {where}</div></div>",
+                unsafe_allow_html=True,
+            )
+        if st.button(
+            "Use live weather" if simple else "Fetch live telemetry",
+            width="stretch",
+            key="fetch_wx",
+        ):
+            reading = get_weather(district, st.session_state.get("wx_key") or None)
+            st.session_state["weather"] = reading
+            for key, value in reading.as_dict().items():
+                st.session_state[f"in_{key}"] = float(
+                    np.clip(value, *FEATURE_BOUNDS[key])
+                )
+            if not reading.is_live:
+                st.toast("No live reading — kept the typical weather.")
+            st.rerun()
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # ---- Manual soil card adjustments, folded away --------------------- #
+    baseline = st.session_state.get("baseline")
+    if baseline is not None:
+        provenance = (
+            f"Typical of {baseline.sample_count:,} soil tests from "
+            f"{baseline.district}."
+            if baseline.is_survey_backed and simple
+            else f"NFSM median of {baseline.sample_count:,} laboratory samples "
+            f"from {baseline.district}."
+            if baseline.is_survey_backed
+            else f"Typical soil for {baseline.district} — not from a survey, "
+            f"so correct it below if you have a soil card."
+            if simple
+            else f"Curated agro-climatic baseline for {baseline.district} "
+            f"(source: {baseline.source}); no survey samples for this unit."
         )
 
-    st.sidebar.markdown("---")
-    st.sidebar.caption(
-        "Close this menu, then press the green button to see your crop."
-        if simple
-        else "Close the sidebar and run the recommendation from the action bar."
-    )
+    values: Dict[str, float] = {}
+    with st.expander(
+        "Change my soil card readings" if simple else "Manual feature override",
+        expanded=False,
+    ):
+        if baseline is not None:
+            st.caption(provenance)
+        soil = st.columns(4)
+        for column, name in zip(soil, ("N", "P", "K")):
+            low, high = FEATURE_BOUNDS[name]
+            index = FEATURE_NAMES.index(name)
+            values[name] = column.number_input(
+                tr(f"field_{name}", simple)
+                if simple
+                else f"{FEATURE_LABELS[index]} ({FEATURE_UNITS[index]})",
+                min_value=float(low),
+                max_value=float(high),
+                step=1.0,
+                key=f"in_{name}",
+            )
+        values["ph"] = soil[3].number_input(
+            tr("field_ph", simple),
+            min_value=float(FEATURE_BOUNDS["ph"][0]),
+            max_value=float(FEATURE_BOUNDS["ph"][1]),
+            step=0.1,
+            key="in_ph",
+        )
+
+        climate_columns = st.columns(3)
+        for column, name in zip(climate_columns,
+                                ("temperature", "humidity", "rainfall")):
+            low, high = FEATURE_BOUNDS[name]
+            index = FEATURE_NAMES.index(name)
+            values[name] = column.slider(
+                f"{tr(f'field_{name}', simple)} ({FEATURE_UNITS[index]})",
+                min_value=float(low),
+                max_value=float(high),
+                step=0.5,
+                key=f"in_{name}",
+            )
+
+        st.text_input(
+            "Weather key (optional)" if simple else "OpenWeatherMap API key",
+            type="password",
+            key="wx_key",
+            help="Leave empty if you do not have one — the app still works.",
+        )
 
     return {
         "district": district,
-        "city": city,
+        "city": district,
+        "acres": float(acres),
         "features": values,
         "season": st.session_state.get("season", season_lib.KHARIF),
     }
@@ -592,7 +654,8 @@ def render_empty_state(simple: bool) -> None:
     steps = (
         [
             ("Check your readings", "The six numbers above describe your land. "
-             "Tap ☰ at the top to correct any of them."),
+             "Change the district at the top, or open the soil card "
+             "expander to correct them."),
             ("Press the green button", "GREENROOT weighs your soil against "
              "22 crops and picks the one that fits best."),
             ("See why, not just what", "It shows which reading decided it, "
@@ -614,6 +677,180 @@ def render_empty_state(simple: bool) -> None:
         for i, (title, body) in enumerate(steps, start=1)
     )
     st.markdown(f"<div class='gr-steps'>{cards}</div>", unsafe_allow_html=True)
+
+
+def _rupees(amount: float) -> str:
+    """Indian digit grouping: 1,23,456 rather than 123,456.
+
+    The Western three-digit grouping is genuinely harder for the intended
+    reader to parse at a glance, and a money figure nobody can read quickly
+    is not doing its job.
+    """
+    negative = amount < 0
+    digits = f"{abs(round(amount)):.0f}"
+    if len(digits) > 3:
+        head, tail = digits[:-3], digits[-3:]
+        parts = []
+        while len(head) > 2:
+            parts.insert(0, head[-2:])
+            head = head[:-2]
+        if head:
+            parts.insert(0, head)
+        digits = ",".join(parts + [tail])
+    return f"{'-' if negative else ''}₹{digits}"
+
+
+def render_commercial_panel(state: Dict[str, object], simple: bool) -> None:
+    """What the crop is worth, what to buy, and when to do it.
+
+    The model answers "which crop"; this answers the three questions a farmer
+    asks immediately afterwards -- what will it earn, what do I carry home
+    from the dealer, and can I spray today.
+    """
+    prediction = state["prediction"]
+    acres = float(state.get("acres") or 1.0)
+    crop = prediction.crop
+
+    base = agronomy.profile(crop)
+    if base is None:
+        # A class with no commercial profile: say so rather than showing
+        # blank cards that look like a loading failure.
+        st.info(
+            f"No price or yield benchmark is on file for {crop.title()}, so "
+            f"the money estimate is not shown. Everything else on this page "
+            f"still applies."
+        )
+        return
+
+    # The benchmark is a starting point, not a quotation. Let them correct it
+    # and have every figure below follow -- a rate they recognise is the
+    # difference between a number they act on and a number they ignore.
+    entered = st.number_input(
+        f"Your mandi rate for {base.english.lower()} (₹ per quintal)"
+        if simple
+        else f"APMC rate override — {base.english} (₹/quintal)",
+        min_value=0.0,
+        max_value=200000.0,
+        value=float(base.price_per_quintal),
+        step=50.0,
+        key=f"price_{crop}",
+        help=f"Benchmark is {_rupees(base.price_per_quintal)}. Change it to "
+             f"your own mandi's rate and the figures below follow.",
+    )
+    override = float(entered) if entered > 0 else None
+    crop_profile = agronomy.with_overrides(crop, price_per_quintal=override)
+    money = crop_profile.economics(acres)
+    if override is not None and abs(override - base.price_per_quintal) > 1:
+        st.caption(
+            f"Using your rate of {_rupees(override)}/quintal instead of the "
+            f"{_rupees(base.price_per_quintal)} benchmark."
+        )
+
+    # ---- Financial ROI -------------------------------------------------- #
+    st.markdown(f"#### {'What this could earn' if simple else 'Benchmark economics'}")
+    roi = st.columns(3)
+    roi[0].metric(
+        "Expected harvest" if simple else "Gross yield",
+        f"{money.yield_quintals:,.0f} quintal"
+        + ("" if abs(money.yield_quintals - 1) < 0.5 else "s"),
+        help=f"{crop_profile.yield_quintal_per_acre:g} quintals per acre "
+             f"× {acres:g} acre(s).",
+    )
+    roi[1].metric(
+        "Mandi rate" if simple else "APMC benchmark",
+        f"{_rupees(crop_profile.price_per_quintal)}/qtl",
+        help="Edit this above if you know your own mandi's rate.",
+    )
+    roi[2].metric(
+        "Money left over" if simple else "Net margin",
+        _rupees(money.net),
+    )
+    roi[2].caption(f"after {_rupees(money.cost)} of costs")
+
+    if money.is_loss:
+        st.warning(
+            "At this rate the crop does not cover its own cost of "
+            "cultivation. Check the mandi rate against your own before you "
+            "commit to it."
+        )
+
+    st.caption(
+        f"Estimate only — {agronomy.BENCHMARK_BASIS}. Mandi rates move every "
+        f"week, and cost of cultivation depends on whether the labour is "
+        f"hired or your own. Put your real rate in the box above to correct "
+        f"this."
+    )
+
+    # ---- Fertiliser bags ------------------------------------------------ #
+    advisory = state.get("advisory")
+    # nutrient_gaps is a signed "observed - required" in kg/ha, so a deficit
+    # is negative. The converter wants a positive requirement; a surplus
+    # means buy nothing, not buy a negative amount.
+    gaps = dict(getattr(advisory, "nutrient_gaps", None) or {})
+    need = {k: max(-float(gaps.get(k, 0.0)), 0.0) for k in ("N", "P", "K")}
+    plan = agronomy.bag_plan(
+        n_kg_per_hectare=need["N"],
+        p_kg_per_hectare=need["P"],
+        k_kg_per_hectare=need["K"],
+        acres=acres,
+    )
+
+    st.markdown(
+        f"#### {'What to buy from the shop' if simple else 'Commercial fertiliser plan'}"
+        f" — {acres:g} acre" + ("" if acres == 1 else "s")
+    )
+    if plan.is_empty:
+        st.success(
+            "Your soil already has enough of all three. Do not buy fertiliser "
+            "for this crop — it would be money wasted."
+        )
+    else:
+        bags = st.columns(3)
+        for column, line in zip(bags, plan.lines):
+            column.metric(
+                f"{line.product}",
+                f"{line.whole_bags} bag" + ("" if line.whole_bags == 1 else "s"),
+            )
+            column.caption(f"{line.grade} · {line.kg:.0f} kg")
+        if plan.nitrogen_from_dap_kg > 0:
+            st.caption(
+                f"The {plan.dap.whole_bags} bag(s) of DAP already carry "
+                f"{plan.nitrogen_from_dap_kg:.0f} kg of nitrogen, which has "
+                f"been taken off the urea above — buying urea for the full "
+                f"nitrogen figure would over-fertilise the field."
+            )
+
+    # ---- Spray advisory ------------------------------------------------- #
+    weather = state.get("weather")
+    features = prediction.raw_features
+    advice = agronomy.spray_advice(
+        rainfall_mm=float(features.get("rainfall", 0.0)),
+        humidity_pct=float(features.get("humidity", 0.0)),
+        temperature_c=float(features.get("temperature", 0.0)),
+        is_live=bool(getattr(weather, "is_live", False)),
+    )
+    spray_heading = "Can I spray today?" if simple else "Today's spray window"
+    st.markdown(f"#### {spray_heading}")
+    renderer = {
+        agronomy.CLEAR: st.success,
+        agronomy.CAUTION: st.warning,
+        agronomy.HOLD: st.error,
+    }[advice.status]
+    renderer(f"{advice.icon} **{advice.headline}** — {advice.detail}")
+
+    # ---- Roadmap -------------------------------------------------------- #
+    st.markdown(
+        f"#### {'Your plan for the season' if simple else 'Crop calendar'}"
+    )
+    stages = agronomy.roadmap(crop)
+    columns = st.columns(len(stages))
+    for column, (index, stage) in zip(columns, enumerate(stages, start=1)):
+        column.markdown(
+            f"<div class='gr-step'><div class='n'>{index}</div>"
+            f"<h4>{stage.name}</h4>"
+            f"<p><b>{stage.when}</b><br>{stage.action}</p></div>",
+            unsafe_allow_html=True,
+        )
 
 
 def render_recommendation_tab(state: Dict[str, object]) -> None:
@@ -640,6 +877,7 @@ def render_recommendation_tab(state: Dict[str, object]) -> None:
             f"""<div class="gr-primary">
                   <div class="gr-sub">{tr('primary_label', simple)}</div>
                   <div class="crop">{prediction.crop}</div>
+                  <div class="kn">{agronomy.kannada_name(prediction.crop)}</div>
                   <div class="conf">{headline} · {district}</div>
                 </div>""",
             unsafe_allow_html=True,
@@ -1464,56 +1702,6 @@ def _render_bulk_result(result: BatchResult) -> None:
 # --------------------------------------------------------------------------- #
 # Tab 5 — Audit Trail & Governance
 # --------------------------------------------------------------------------- #
-def _record_date(stamp: object, simple: bool) -> str:
-    """A saved record's date, in the register the reader is being addressed in.
-
-    Technical mode keeps the ISO form, which is what the ledger stores and
-    what an examiner will want to match against the database.
-    """
-    parsed = pd.to_datetime(stamp, errors="coerce")
-    if pd.isna(parsed):
-        return "unknown date" if simple else str(stamp)[:10]
-    return f"{parsed:%d %b %Y}" if simple else f"{parsed:%Y-%m-%d}"
-
-
-def _farmer_ledger(frame: pd.DataFrame) -> pd.DataFrame:
-    """The ledger as a farmer can read it.
-
-    The stored frame is the audit schema: ISO timestamps, raw column keys,
-    and two columns -- primary_shap_driver and jaccard_index -- that are
-    meaningful to an examiner and meaningless to the person who saved the
-    record. Showing those to someone the rest of the app addresses in plain
-    words undoes the plain words.
-    """
-    view = pd.DataFrame(
-        {
-            "Saved on": pd.to_datetime(
-                frame["timestamp"], errors="coerce"
-            ).dt.strftime("%d %b %Y"),
-            "Place": frame["district"],
-            "Crop": frame["recommended_crop"].astype(str).str.title(),
-            "Match": frame["confidence"].round().astype("Int64").astype(str)
-            + " / 100",
-            "Nitrogen": frame["N"].round().astype("Int64"),
-            "Phosphorus": frame["P"].round().astype("Int64"),
-            "Potassium": frame["K"].round().astype("Int64"),
-            "Soil pH": frame["pH"].round(1),
-            "Rain (mm)": frame["rainfall"].round().astype("Int64"),
-        }
-    )
-    # An unparseable timestamp would render as "NaT"; say so in words.
-    return view.assign(**{"Saved on": view["Saved on"].fillna("unknown")})
-
-
-def _table_height(rows: int, cap: int = 380) -> int:
-    """Fit the grid to its content.
-
-    Streamlit pads a fixed-height dataframe with empty rows, so a one-record
-    ledger otherwise renders nine blank lines and reads as a loading failure.
-    """
-    return int(min(cap, 38 + 36 * max(rows, 1)))
-
-
 def render_audit_tab() -> None:
     """Filterable view over the persisted recommendation ledger."""
     simple = is_simple()
@@ -1564,10 +1752,9 @@ def render_audit_tab() -> None:
         summary[0].metric(
             "Advice saved",
             f"{len(frame):,}",
-            # Only worth saying when the date window is hiding something.
-            help=None,
-            delta=f"of {total:,} in all" if total != len(frame) else None,
-            delta_color="off",
+            # Only worth saying when the date window is hiding something,
+            # and as a caption: metric deltas always draw a direction arrow.
+            help=f"of {total:,} saved in all" if total != len(frame) else None,
         )
         summary[1].metric(
             "Average match", f"{frame['confidence'].mean():.0f} / 100"
@@ -1580,8 +1767,7 @@ def render_audit_tab() -> None:
         summary[0].metric(
             "Records shown",
             f"{len(frame):,}",
-            delta=f"of {total:,} total" if total != len(frame) else None,
-            delta_color="off",
+            help=f"of {total:,} total" if total != len(frame) else None,
         )
         summary[1].metric("Mean confidence", f"{frame['confidence'].mean():.1f}%")
         summary[2].metric("Distinct crops", f"{frame['recommended_crop'].nunique()}")
@@ -1591,10 +1777,10 @@ def render_audit_tab() -> None:
         )
 
     st.dataframe(
-        _farmer_ledger(frame) if simple else frame,
+        db.farmer_view(frame) if simple else db.examiner_view(frame),
         hide_index=True,
         width="stretch",
-        height=_table_height(len(frame)),
+        height=db.table_height(len(frame)),
     )
 
     # Reload a past reading into the form. An officer revisiting a plot should
@@ -1604,7 +1790,7 @@ def render_audit_tab() -> None:
         (
             f"#{int(row['id'])} · {row['district']} · "
             f"{str(row['recommended_crop']).title()} · "
-            f"{_record_date(row['timestamp'], simple)}"
+            f"{db.record_date(row['timestamp'], simple)}"
         ): row
         for _, row in frame.iterrows()
     }
@@ -1771,7 +1957,23 @@ def main() -> None:
     if recommender is None:
         st.stop()
 
-    inputs = render_sidebar()
+    st.sidebar.markdown("### GREENROOT")
+    st.sidebar.toggle(
+        "👨‍🏫 Examiner / AI Mode",
+        value=False,
+        key="examiner_mode",
+        help="Off: the farmer portal. On: the model-audit deck — probability "
+             "distribution, Z-scores, SHAP/LIME consensus, sensitivity "
+             "curves and the raw ledger.",
+    )
+    st.sidebar.caption(
+        "Examiner mode shows the evidence behind the recommendation: "
+        "explainer agreement, calibration and the audit trail."
+        if not is_simple()
+        else "Turn this on to see how the model reached its answer."
+    )
+
+    inputs = render_controls()
     simple = is_simple()
 
     tagline = (
@@ -1851,6 +2053,9 @@ def main() -> None:
         "district": st.session_state.get("district", inputs["district"]),
         "season": inputs["season"],
         "recommender": recommender,
+        "acres": inputs["acres"],
+        "weather": st.session_state.get("weather"),
+        "price_override": st.session_state.get("price_override"),
     }
 
     # Both slots are filled here, after the run handler: this is the first
@@ -1871,10 +2076,11 @@ def main() -> None:
         hint_slot.markdown(
             "<div class='gr-readout-hint'>"
             + (
-                "These are your land's readings. Tap \u2630 at the top to "
-                "change them, then press the green button."
+                "These are your land's readings. Change your district "
+                "above if they are wrong, then press the green button."
                 if simple
-                else "Adjust soil chemistry and microclimate in the sidebar."
+                else "Set the district above, or override features in the "
+                "manual expander."
             )
             + "</div>",
             unsafe_allow_html=True,
@@ -1906,38 +2112,75 @@ def main() -> None:
         hint_slot.markdown(
             "<div class='gr-readout-hint'>"
             + (
-                "Changed something? Tap \u2630 at the top to edit your "
-                "readings, then press the button again."
+                "Changed something? Edit your readings at the top, then "
+                "press the button again."
                 if simple
-                else "Adjust the inputs in the sidebar and re-run to refresh "
-                "every tab."
+                else "Change the inputs above and re-run to refresh every "
+                "tab."
             )
             + "</div>",
             unsafe_allow_html=True,
         )
 
-    tabs = st.tabs(
-        [
-            tr("tab_recommend", simple),
-            tr("tab_why", simple),
-            tr("tab_whatif", simple),
-            tr("tab_bulk", simple),
-            tr("tab_records", simple),
-            tr("tab_card", simple),
-        ]
-    )
-    with tabs[0]:
-        render_recommendation_tab(state)
-    with tabs[1]:
-        render_xai_tab(state)
-    with tabs[2]:
-        render_sensitivity_tab(state)
-    with tabs[3]:
-        render_bulk_tab()
-    with tabs[4]:
-        render_audit_tab()
-    with tabs[5]:
-        render_card_tab(state)
+    # Two audiences, two decks. The farmer portal leads with what to do;
+    # the examiner deck leads with why to believe it. Everything is still
+    # reachable in both -- the toggle changes the order and the wording, not
+    # what the system is willing to show.
+    if simple:
+        tabs = st.tabs(
+            [
+                "🌱 Your Crop",
+                "💰 Cost & Profit",
+                "💡 Why This Crop?",
+                "🧾 Your Soil Card",
+                "🗂️ Past Records",
+            ]
+        )
+        with tabs[0]:
+            render_recommendation_tab(state)
+        with tabs[1]:
+            if state.get("prediction") is None:
+                st.info(
+                    "Press the green button first — then this shows what the "
+                    "crop could earn and what to buy."
+                )
+            else:
+                render_commercial_panel(state, simple)
+        with tabs[2]:
+            render_xai_tab(state)
+        with tabs[3]:
+            render_card_tab(state)
+        with tabs[4]:
+            render_audit_tab()
+    else:
+        tabs = st.tabs(
+            [
+                "🎯 Prediction & Z-scores",
+                "🔍 XAI Consensus",
+                "🧭 What-If Sensitivity",
+                "💰 Commercial Model",
+                "📦 Bulk Advisory",
+                "📋 Audit Trail",
+                "🧾 Soil Health Card",
+            ]
+        )
+        with tabs[0]:
+            render_recommendation_tab(state)
+        with tabs[1]:
+            render_xai_tab(state)
+        with tabs[2]:
+            render_sensitivity_tab(state)
+        with tabs[3]:
+            if state.get("prediction") is None:
+                st.info("Generate a recommendation to price it.")
+            else:
+                render_commercial_panel(state, simple)
+        with tabs[4]:
+            render_bulk_tab()
+        with tabs[5]:
+            render_audit_tab()
+        with tabs[6]:
+            render_card_tab(state)
 
     st.markdown("---")
     st.caption(

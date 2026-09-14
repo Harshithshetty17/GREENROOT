@@ -607,16 +607,87 @@ failure degrades to a documented mock reading.
 
 ---
 
-## 6. Dashboard
+## 6. Dashboard — two personas, one system
+
+The dashboard serves two readers, and the **👨‍🏫 Examiner / AI Mode** toggle in
+the sidebar switches between them. Both see the same model output; what
+changes is the ordering and the register. Nothing is hidden from either — the
+toggle decides what leads.
+
+### Farmer portal (default)
 
 | Tab | Purpose |
 |---|---|
-| 🎯 **Precision Recommendation** | Primary crop card with posterior confidence, top-3 ranked alternatives, agronomic advisory, fertiliser prescription, Z-score deviation profile, and one-click persistence to the audit ledger. |
-| 🔍 **Explainable AI Consensus** | Live Jaccard index with its mathematical definition, side-by-side TreeSHAP and LIME attribution plots, and a dynamic fidelity badge. |
-| 🧭 **What-If Sensitivity** | Perturbs one feature across a ±100% sweep holding the other six constant, plotting multi-class posterior curves with the current-value marker and tabulating the exact thresholds at which the recommendation flips. |
-| 📦 **Bulk Advisory** | Upload a whole soil survey (CSV or Excel) and receive a recommendation per sample. Column names are matched leniently, each row is validated independently so one bad reading never aborts the run, and samples needing human review are surfaced first. |
-| 📋 **Audit Trail & Governance** | Date-filtered view of the SQLite ledger with summary statistics, per-crop distribution, and a CSV export. |
-| 🧾 **Farmer Soil Health Card** | Print-ready card covering tested chemistry, microclimate, primary and secondary crop choices, and fertiliser management. Exports as **PDF**, HTML, Markdown or plain text, and renders **bilingually in Kannada** alongside English. |
+| 🌱 **Your Crop** | Bilingual crop card — English and Kannada — with a match score out of 100, top-3 alternatives, season fit, and plain-language agronomic advice. |
+| 💰 **Cost & Profit** | Expected harvest, mandi rate and money left over; the three-sack fertiliser plan in whole 50 kg bags of Urea, DAP and Potash for the stated acreage; today's spray window; and a four-stage calendar from land preparation to harvest. |
+| 💡 **Why This Crop?** | The two independent checks (TreeSHAP and LIME), what each says, and whether they agree — in words, not coefficients. |
+| 🧾 **Your Soil Card** | Print-ready card, exportable as PDF, HTML, Markdown or text, bilingual in Kannada. |
+| 🗂️ **Past Records** | Saved advice with localised dates and integer scores. No schema column names. |
+
+### Examiner / AI mode
+
+| Tab | Purpose |
+|---|---|
+| 🎯 **Prediction & Z-scores** | Posterior confidence, ranked alternatives, per-feature Z-score deviation profile, OOD flags. |
+| 🔍 **XAI Consensus** | Jaccard index with its definition, side-by-side TreeSHAP and LIME attributions, fidelity badge. |
+| 🧭 **What-If Sensitivity** | One feature swept ±100% holding the other six constant, multi-class posterior curves, exact argmax-flip thresholds. Legend sits **above** the axes, never over the curves. |
+| 💰 **Commercial Model** | The same economics, stated as benchmarks with their basis. |
+| 📦 **Bulk Advisory** | A whole soil survey at once, with a review queue for low-confidence and out-of-distribution rows. |
+| 📋 **Audit Trail** | The ledger exactly as stored — `primary_shap_driver`, `jaccard_index`, ISO timestamps — with CSV export. |
+| 🧾 **Soil Health Card** | As above. |
+
+### The seam between them
+
+`src/database/db.py` is the dual-read façade. `farmer_view()` renders localised
+dates, an integer score out of 100 and plain column names, and drops
+`TECHNICAL_ONLY` columns outright; `examiner_view()` is a deliberate
+pass-through of the stored row. Serving one reader the other's view is the
+failure this module exists to prevent.
+
+### Top controls
+
+District, acreage, sowing season and the live-weather indicator sit in the
+main area, not the sidebar — a farmer on a phone never opens the sidebar.
+Choosing a district *is* the baseline load: it fills all seven features in one
+tap. The raw readings stay one tap further away in a **Change my soil card
+readings** expander, because most people will accept the district baseline.
+
+---
+
+## 6a. Commercial intelligence
+
+`src/utils/agronomy.py` carries per-crop metadata for all 22 classes: the
+Kannada name, benchmark yield per acre, APMC mandi rate, cost of cultivation
+and duration.
+
+**The fertiliser converter is the part with real agronomy in it.** Turning an
+N-P-K deficit into sacks is a sequence, not three divisions:
+
+1. Meet the phosphorus deficit with **DAP** at 46% P₂O₅.
+2. DAP is also **18% nitrogen** — credit what it delivers against the N target.
+3. Top up the remaining nitrogen with **Urea** at 46% N.
+4. Meet the potassium deficit with **MOP** at 60% K₂O.
+
+Sizing urea from the raw nitrogen figure without that credit over-applies
+nitrogen on every plan needing both, which is most of them. Quantities round
+**up** to whole sacks: a part-sack cannot be bought, and under-dosing a
+deficient nutrient wastes the whole intervention.
+
+> **On the money figures.** Yield, mandi rate and cost of cultivation are
+> *indicative planning benchmarks* for Karnataka, not live market data. They
+> are stamped with their basis, editable in the UI so a farmer's own rate
+> replaces them, and always presented as an estimate. `src/utils/economics.py`
+> remains the zero-defaults path for a farmer who knows their own numbers.
+
+**On the Kannada names.** Sixteen of the twenty-two are corroborated against
+the bilingual crop labels in the shipped NFSM survey (`Bengalgram/ಕಡಲೆಕಾಳು`),
+and `tests/test_agronomy.py` re-derives that set from the CSV so the claim
+cannot rot. The remaining six — apple, coconut, kidneybeans, lentil, maize and
+mothbeans — are not attested there and still want a native speaker's review.
+Maize is deliberately excluded: the survey labels it `Maize/ಜೋಳ`, but ಜೋಳ is
+*jowar*, and the same file carries both `Jowar/ಜೋಳ` and the correct
+`Maize(fodder)/ಮುಸುಕಿನಜೋಳ`. That entry is a data-entry conflation and
+corroborates nothing.
 
 ---
 
@@ -624,7 +695,8 @@ failure degrades to a documented mock reading.
 
 ```text
 GREENROOT/
-├── app.py                      Streamlit presentation layer (5 tabs)
+├── app.py                      Streamlit presentation layer (dual persona)
+├── verify_cv.py                Independent 5-fold CV; never touches models/
 ├── evaluate_system.py          Formal empirical validation suite
 ├── validate_architecture.py    Architectural audit: ablation, significance,
 │                               leakage, learning curve, calibration
@@ -649,14 +721,19 @@ GREENROOT/
 │   ├── core/theme.py               Design tokens; CVD-validated chart palette
 │   ├── core/pwa.py                 Web-app manifest: installs to home screen
 │   ├── database/db_manager.py      Thread-safe SQLite, WAL, migrations
+│   ├── database/db.py              Dual-read façade: farmer vs examiner view
 │   ├── services/
 │   │   ├── weather_service.py      OWM client: timeout, cache, offline mock
-│   │   └── soil_service.py         NFSM baselines with 4-tier resolution
+│   │   └── soil_service.py         NFSM baselines, district aliases,
+│   │                               climate normals, 7-feature profile
 │   ├── models/
 │   │   ├── inference.py            CropRecommender: validate → scale → rank
 │   │   ├── batch.py                Bulk advisory over a whole soil survey
 │   │   └── xai_engine.py           ExplainerConsensus: SHAP + LIME + Jaccard
 │   └── utils/
+│       ├── agronomy.py             22-crop metadata, Kannada names, APMC
+│       │                           benchmarks, 50 kg bag converter, spray
+│       │                           advisory, four-stage crop roadmap
 │       ├── agronomy_advisory.py    Hydrology, nutrition, pH, thermal heuristics
 │       ├── seasons.py              Kharif / Rabi / Summer sowing windows
 │       ├── intervention.py         "What if I follow this advice?" simulation
@@ -665,13 +742,17 @@ GREENROOT/
 │       ├── plain_language.py       Farmer register, bag/acre units
 │       └── report_generator.py     PDF / HTML / Markdown / text health card
 │
-└── tests/                      323 tests, 1 environment-conditional skip
+└── tests/                      523 tests, 1 environment-conditional skip
     ├── test_models.py              Validation, calibration, sweep, Jaccard
     ├── test_services.py            Mocked transports, district resolution
     ├── test_database.py            CRUD, migration, rollback, concurrency
     ├── test_batch.py               Column resolution, row isolation, Kannada
     ├── test_decision_support.py    Seasons, simulation, costing honesty
     ├── test_presentation.py        Palette gates, unit conversion, jargon
+    ├── test_agronomy.py            Bag arithmetic, DAP nitrogen credit,
+    │                               Kannada names re-derived from the CSV
+    ├── test_dual_persona.py        District coverage, in-distribution
+    │                               baselines, farmer/examiner ledger seam
     └── test_validation_statistics.py
                                     Corrected t-test, ECE, Brier score
 ```

@@ -87,11 +87,23 @@ phone without your computer running.
 
 - **`requirements.txt` is already correct** — every third-party import in the
   project is declared, verified by an import audit.
-- **Set the Python version to 3.12 or 3.13.** In the deploy dialog open
-  **Advanced settings** and choose it there. This matters: `shap` declares
-  `requires_python >=3.12` and `scikit-learn` 1.9 declares `>=3.11`, so a
-  build on 3.11 or older fails while installing. Checked against PyPI —
-  scikit-learn 1.9.0 publishes wheels for cp311 through cp314.
+- **Set the Python version to 3.12 or 3.14 — not 3.13.** In the deploy dialog
+  open **Advanced settings** and choose it there. Checked package by package
+  against PyPI rather than assumed:
+
+  | Package | 3.12 | 3.13 | 3.14 |
+  |---|---|---|---|
+  | `shap` | wheel | **no wheel** | wheel |
+  | `numpy`, `pandas`, `scipy`, `matplotlib`, `pillow`, `scikit-learn` | wheel | wheel | wheel |
+  | `streamlit`, `fpdf2`, `openpyxl` | pure Python | pure Python | pure Python |
+
+  `shap` publishes no 3.13 wheel, so a 3.13 build tries to compile it from
+  source and generally fails. Anything below 3.12 fails too — `shap` declares
+  `requires_python >=3.12`.
+
+- **`lime` ships no wheels for any Python version**, only a source archive, so
+  pip always builds it. It is pure Python and normally succeeds, but if a
+  deploy fails during install, that is the first line to look for in the log.
 - **`scikit-learn` is pinned to 1.9.0** on purpose: the artefacts in `models/`
   were serialised under that version. If a build fails, raise the Python
   version rather than relaxing the pin — unpickling an estimator across a

@@ -1,0 +1,11 @@
+# Never commit the upload key or its passwords.
+keystore.properties
+*.jks
+*.keystore
+
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+captures/

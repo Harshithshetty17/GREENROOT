@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+
+    <!-- The launcher may mask to a 66dp circle: scale the mark in
+         about the canvas centre so the right leaf tip is not clipped. -->
+    <group android:scaleX="0.85" android:scaleY="0.85"
+           android:pivotX="54" android:pivotY="54">
+    <path android:pathData="M54,84 V52" android:strokeColor="#1F7A4D"
+            android:strokeWidth="5.5" android:strokeLineCap="round" />
+        <path android:pathData="M55,55 C55,40 66,30 82,29 C83,45 72,55 55,55 Z"
+            android:fillColor="#1F7A4D" />
+        <path android:pathData="M53,67 C53,55 44,47 30,46 C29,60 38,67 53,67 Z"
+            android:fillColor="#3FA46C" />
+    </group>
+</vector>

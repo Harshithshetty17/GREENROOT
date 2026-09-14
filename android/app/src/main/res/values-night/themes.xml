@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The dashboard itself is a light design, so the shell stays light
+         rather than framing a white page in a dark chrome. -->
+    <style name="Theme.GreenRoot.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">#FFFFFF</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash</item>
+        <item name="postSplashScreenTheme">@style/Theme.GreenRoot</item>
+    </style>
+</resources>

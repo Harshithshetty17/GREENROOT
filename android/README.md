@@ -1,64 +1,46 @@
-# GreenRoot — Android app
+# GREENROOT for Android
 
-A thin native shell around the deployed dashboard. The model runs on the
-server, so this is a WebView container rather than a reimplementation: one
-codebase, one set of behaviour, and the phone picks up server fixes without a
-new release.
+A native shell around the deployed GREENROOT dashboard.
 
-> **Not built or tested in this repository.** The project is written against
-> standard Android APIs but no Android SDK was available where it was authored,
-> so it has never been compiled or run on a device. Expect to fix a small issue
-> or two on first build — treat it as a starting point, not a finished binary.
+## What is native and what is not
+
+The stacking ensemble runs on the server, so the recommendation screen is the
+dashboard in a WebView: one implementation of the model, and the phone picks up
+fixes the moment the server is redeployed.
+
+What the shell adds is the part a browser cannot do — **the advice a farmer
+saves is written to the phone and stays readable with no connection**. Fields
+do not have signal. Advice you can only read when the network is up is advice
+you cannot act on while standing in the crop.
+
+| File | Role |
+|---|---|
+| `MainActivity.kt` | WebView host, splash, pull-to-refresh, downloads, the offline library |
+| `CardStore.kt` | Saved cards, in app-private storage, atomic writes, capped at 100 |
+| `NativeBridge.kt` | `window.GreenRootNative` — what the dashboard calls to save and share |
+
+The web half of that bridge is `src/core/native.py`, covered by
+`tests/test_native_bridge.py`.
 
 ## Before you build
 
-Open `app/src/main/java/in/greenroot/app/MainActivity.kt` and set your address:
+Point `MainActivity.APP_URL` at your own deployment. It must be `https`:
+cleartext is disabled in the manifest.
 
-```kotlin
-private const val APP_URL = "https://greenroot.streamlit.app"
+```bash
+cp keystore.properties.example keystore.properties   # then fill it in
+./gradlew bundleRelease
 ```
 
-It must be **https**. The manifest sets `usesCleartextTraffic="false"`, so a
-plain `http://192.168.x.x` LAN address will be blocked. If you deliberately
-want to point at a LAN server for a demo, flip that flag — and understand you
-are turning off a protection.
+## Publishing
 
-## Build an installable APK
+See **[PLAYSTORE.md](PLAYSTORE.md)** — store listing copy, the data safety
+answers, the graphics, and an honest account of the Minimum Functionality
+policy risk that applies to any WebView app.
 
-1. Install **Android Studio** (free, ~1 GB) from
-   <https://developer.android.com/studio>
-2. **File → Open** → select this `android/` folder
-3. Wait for Gradle to sync; it downloads the SDK and build tools on first run
-4. **Build → Build Bundle(s) / APK(s) → Build APK(s)**
-5. The APK lands in `app/build/outputs/apk/debug/app-debug.apk`
+## Status
 
-Copy that file to a phone and open it. Android will warn about installing from
-an unknown source — allow it for your file manager. This is how you demo on any
-Android phone without a store.
-
-## What it does
-
-- Full-screen, portrait, own icon and name in the launcher
-- Back button walks web history before exiting
-- Card exports (PDF, HTML, CSV) go to the phone's Downloads folder
-- A readable "no internet" screen instead of a blank page
-- External links open in the real browser, not inside the app
-
-## Publishing to the Play Store
-
-Possible, but read this first:
-
-- A Google Play Developer account costs **US$25**, one time.
-- Review takes days, sometimes longer for a first submission.
-- **Google frequently rejects WebView wrappers** under the "minimum
-  functionality" policy — an app whose only content is a website. To pass you
-  generally need genuine native value: offline capability, push notifications,
-  camera/GPS integration, home-screen widgets. A shell around a web page on its
-  own is the classic rejection case.
-- You also need a signed release build, a privacy policy URL, store artwork and
-  a content rating questionnaire.
-
-**For a capstone demo, the APK above is enough** — it installs and runs on any
-Android phone, which is what a panel actually wants to see. The "Add to Home
-screen" route (see `../PHONE.md`) gets you the same icon and full-screen feel
-with no build step at all.
+**This Kotlin has never been compiled.** The Android SDK is served from
+`dl.google.com`, which was not reachable from the environment this was written
+in. The XML parses and the structure is sound, but open it in Android Studio
+and expect to fix small things on the first build.

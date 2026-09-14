@@ -38,6 +38,12 @@ from src.core.config import (
     OOD_ZSCORE_THRESHOLD,
     REPORTED_CV_ACCURACY,
 )
+from src.core import native
+from src.services.soil_service import (
+    district_profile,
+    get_district_climate,
+)
+from src.utils import agronomy
 from src.core.pwa import install as install_pwa
 from src.core.theme import (
     BRAND,
@@ -50,7 +56,8 @@ from src.core.theme import (
     series_palette,
     style_axes,
 )
-from src.database import db_manager
+from src import auth
+from src.database import db, db_manager
 from src.models.batch import BatchProcessor, BatchResult, MAX_BATCH_ROWS, build_template
 from src.models.inference import CropRecommender, ValidationError
 from src.models.xai_engine import ExplainerConsensus
@@ -104,15 +111,86 @@ _CSS = """
   section[data-testid="stSidebar"] .block-container { padding-top: 1.2rem; }
 
   /* ---- Hero ----------------------------------------------------------- */
+  /* The hero carries the current readings rather than sitting empty: an
+     un-run app otherwise shows a large blank slab above the fold. */
   .gr-hero {
-    background: linear-gradient(135deg, #1b6e45 0%, #2f9e5f 100%);
-    color: #fff; padding: 22px 28px; border-radius: 14px; margin-bottom: 20px;
-    box-shadow: 0 1px 2px rgba(20,40,29,.06), 0 8px 24px rgba(20,40,29,.08);
+    background:
+      radial-gradient(120% 140% at 88% -20%, rgba(255,255,255,.16) 0%,
+                      rgba(255,255,255,0) 58%),
+      linear-gradient(135deg, #115c3c 0%, #1b6e45 42%, #2f9e5f 100%);
+    color: #fff; padding: 20px 26px 18px; border-radius: 16px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 2px rgba(20,40,29,.06), 0 10px 28px rgba(20,40,29,.10);
   }
-  .gr-hero h1 { margin: 0 0 6px; font-size: 27px; font-weight: 700;
-                letter-spacing: -.2px; line-height: 1.15; }
-  .gr-hero p  { margin: 0; opacity: .94; font-size: 14.5px; line-height: 1.5;
-                max-width: 68ch; }
+  .gr-hero h1 { margin: 0; font-size: 25px; font-weight: 700;
+                letter-spacing: .4px; line-height: 1.15; }
+  .gr-hero p  { margin: 3px 0 0; opacity: .90; font-size: 14px;
+                line-height: 1.5; max-width: 72ch; }
+  .gr-hero-top { display: flex; align-items: baseline; gap: 10px;
+                 flex-wrap: wrap; }
+  .gr-hero-place { margin-left: auto; font-size: 13px; font-weight: 600;
+                   letter-spacing: .3px; padding: 4px 12px; border-radius: 999px;
+                   background: rgba(255,255,255,.15); white-space: nowrap; }
+
+  /* Reading strip: one tile per feature, label over value. */
+  .gr-reads { display: grid; gap: 1px; margin-top: 16px;
+              grid-template-columns: repeat(6, 1fr);
+              background: rgba(255,255,255,.16); border-radius: 10px;
+              overflow: hidden; }
+  .gr-read { background: rgba(8,48,30,.22); padding: 9px 10px 10px; }
+  .gr-read .k { font-size: 10.5px; letter-spacing: .7px; text-transform: uppercase;
+                opacity: .78; font-weight: 600; }
+  .gr-read .v { font-size: 19px; font-weight: 700; line-height: 1.2;
+                margin-top: 2px; letter-spacing: -.3px; }
+  .gr-read .v small { font-size: 11.5px; font-weight: 600; opacity: .72;
+                      margin-left: 2px; letter-spacing: 0; }
+
+  /* The three driver readouts sit side by side and are compared at a
+     glance, so they need a shared baseline and a shared edge. */
+  .gr-drivercard { border: 1px solid #dfe8e2; border-radius: 12px;
+                   padding: 13px 15px; background: #fff; height: 100%; }
+  .gr-drivercard.agree { background: #f3f8f5; border-color: #c3ddce; }
+  .gr-drivercard .k { font-size: 11.5px; letter-spacing: .5px;
+                      text-transform: uppercase; color: #5c6f63;
+                      font-weight: 650; }
+  .gr-drivercard .v { font-size: 16px; font-weight: 650; color: #14281d;
+                      line-height: 1.35; margin-top: 5px; }
+  .gr-drivercard.agree .v { color: #14603c; }
+
+  /* After a run the banner carries the answer, not the inputs: it repeats
+     on every tab, so it has to be short. */
+  .gr-hero-compact { padding: 14px 26px 15px; margin-bottom: 14px; }
+  .gr-hero-answer { display: flex; align-items: baseline; gap: 12px;
+                    flex-wrap: wrap; margin-top: 8px; }
+  .gr-hero-answer .crop { font-size: 30px; font-weight: 750; line-height: 1.05;
+                          text-transform: uppercase; letter-spacing: .5px; }
+  .gr-hero-answer .score { font-size: 14px; font-weight: 600; opacity: .92; }
+  .gr-hero-reads { margin-top: 7px; font-size: 12.5px; opacity: .80;
+                   letter-spacing: .2px; }
+
+  /* A weak match must read as weak here too, or the banner contradicts the
+     card directly beneath it. */
+  .gr-hero-unsure {
+    background:
+      radial-gradient(120% 140% at 88% -20%, rgba(255,255,255,.14) 0%,
+                      rgba(255,255,255,0) 58%),
+      linear-gradient(135deg, #7a5c12 0%, #97731c 45%, #b8912e 100%);
+  }
+
+  /* Empty-state guidance: on-brand, and it says something worth reading
+     instead of a stock blue notice restating the button label. */
+  .gr-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+              margin: 4px 0 2px; }
+  .gr-step { border: 1px solid #dfe8e2; border-radius: 14px; padding: 18px 20px;
+             background: #fff; box-shadow: 0 1px 2px rgba(20,40,29,.04); }
+  .gr-step .n { display: inline-flex; align-items: center; justify-content: center;
+                width: 26px; height: 26px; border-radius: 999px; font-size: 13px;
+                font-weight: 700; background: #e7f2eb; color: #14603c;
+                margin-bottom: 9px; }
+  .gr-step h4 { margin: 0 0 5px !important; padding: 0 !important;
+                font-size: 15px; font-weight: 650; color: #14281d; }
+  .gr-step p { margin: 0 !important; padding: 0 !important; font-size: 13.5px;
+               line-height: 1.55; color: #5c6f63; }
 
   /* ---- Tabs ----------------------------------------------------------- */
   button[data-baseweb="tab"] { font-size: 14.5px; font-weight: 500;
@@ -135,7 +213,44 @@ _CSS = """
     font-size: 38px; font-weight: 750; color: #14603c; text-transform: uppercase;
     letter-spacing: .4px; line-height: 1.1; margin: 4px 0 2px;
   }
+  .gr-primary .kn { font-size: 20px; font-weight: 600; color: #1f7a4d;
+                    line-height: 1.3; margin: 0 0 6px; }
   .gr-primary .conf { font-size: 14.5px; color: #3d5548; font-weight: 500; }
+
+  /* Below 60/100 the card drops its confident green: an uncertain answer
+     should not look like a certain one. */
+  .gr-primary.unsure {
+    background: linear-gradient(160deg, #fdf9f0 0%, #fbf4e6 100%);
+    border-color: #e8d6ac;
+  }
+  .gr-primary.unsure .crop { color: #8a6a1f; }
+  .gr-primary.unsure .kn   { color: #8a6a1f; }
+  .gr-primary .warnline {
+    font-size: 12.5px; font-weight: 700; letter-spacing: .3px;
+    text-transform: uppercase; color: #a6382a; margin-bottom: 8px;
+  }
+
+  /* Top control bar: the only things most people ever touch. */
+  .gr-controls { margin-bottom: 2px; }
+  .gr-wx { border: 1px solid #dfe8e2; border-radius: 10px; padding: 7px 12px;
+           background: #f4f8f5; margin-bottom: 6px; }
+  .gr-wx.live { background: #e7f2eb; border-color: #b9d8c6; }
+  .gr-wx .k { font-size: 10px; letter-spacing: .7px; font-weight: 700;
+              color: #5c6f63; }
+  .gr-wx.live .k { color: #14603c; }
+  .gr-wx .v { font-size: 16px; font-weight: 700; color: #14281d;
+              line-height: 1.25; }
+  .gr-wx .s { font-size: 11px; color: #5c6f63; }
+
+  /* A recovery code is transcribed by hand onto paper. Big, monospaced and
+     widely spaced so 8 and B cannot be confused at a glance. */
+  .gr-code {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 27px; font-weight: 700; letter-spacing: 3px;
+    text-align: center; color: #14281d;
+    background: #fff; border: 2px dashed #c9a227; border-radius: 10px;
+    padding: 14px 8px; margin: 6px 0 4px;
+  }
 
   /* ---- Badges & metrics ----------------------------------------------- */
   .gr-badge {
@@ -153,8 +268,9 @@ _CSS = """
                 background: #f4f8f5; border: 1px solid #e0e9e3;
                 border-radius: 10px; padding: 10px 14px; }
   .gr-readout b { color: #14603c; }
-  .gr-readout-hint { font-size: 12.5px; color: #5c6f63;
-                     margin: 5px 0 10px 2px; }
+  /* Sits beside the run button, so align to its optical centre. */
+  .gr-readout-hint { font-size: 13px; color: #5c6f63; line-height: 1.5;
+                     margin: 0; padding-top: 7px; }
 
   /* ---- Advisory items -------------------------------------------------- */
   .gr-advisory {
@@ -187,8 +303,13 @@ _CSS = """
   @media (max-width: 820px) {
     /* The collapsed sidebar is 320px wide translated -300px, so its right
        20px sits over the content area. Inset the content past that rail or
-       the first character of every line is painted over. */
-    .block-container { padding: 1rem 1rem 2.5rem 1.9rem; }
+       the first character of every line is painted over -- and drop the
+       rail's fill, otherwise it reads as a stripe down the left edge and
+       the page looks off-centre. Gutters are then equal on both sides. */
+    .block-container { padding: 1rem 1.9rem 2.5rem 1.9rem; }
+    section[data-testid="stSidebar"][aria-expanded="false"] {
+      background: transparent; border-right: none;
+    }
 
     /* Streamlit columns shrink rather than wrap by default; force a stack. */
     div[data-testid="stHorizontalBlock"] { flex-direction: column; gap: .85rem; }
@@ -196,9 +317,30 @@ _CSS = """
       width: 100% !important; flex: 1 1 100% !important; min-width: 0 !important;
     }
 
-    .gr-hero { padding: 16px 18px; border-radius: 12px; }
+    /* A row of metrics would read better side by side than stacked, but
+       there is no safe selector for it: :has(... stMetric) also matches the
+       main two-column layout, because a metric sits somewhere inside its
+       left column, and that layout must stack or the crop card wraps to
+       three words a line. Stacked metrics cost space; an unstacked page is
+       broken. */
+
+    .gr-hero { padding: 16px 16px 14px; border-radius: 14px; }
     .gr-hero h1 { font-size: 21px; }
-    .gr-hero p  { font-size: 13px; }
+    .gr-hero p  { font-size: 12.5px; }
+    .gr-hero-place { font-size: 12px; padding: 3px 10px; }
+    .gr-hero-compact { padding: 13px 16px 14px; }
+    .gr-hero-answer .crop { font-size: 25px; }
+    .gr-hero-answer .score { font-size: 13px; }
+    .gr-hero-reads { font-size: 11.5px; }
+    /* Six tiles across 390px gives 55px each -- too narrow for "190 mm".
+       Three across two rows keeps every value on one line. */
+    .gr-reads { grid-template-columns: repeat(3, 1fr); margin-top: 13px; }
+    .gr-read { padding: 8px 9px 9px; }
+    .gr-read .v { font-size: 17px; }
+    .gr-steps { grid-template-columns: 1fr; gap: 10px; }
+    .gr-step { padding: 14px 16px; }
+    /* Stacked above the button here, not beside it. */
+    .gr-readout-hint { padding-top: 0; margin-bottom: 4px; }
 
     .gr-primary { padding: 18px 18px; }
     .gr-primary .crop { font-size: 30px; }
@@ -225,6 +367,7 @@ _CSS = """
 
   @media (max-width: 420px) {
     .gr-hero h1 { font-size: 19px; }
+    .gr-read .v { font-size: 16px; }
     .gr-primary .crop { font-size: 26px; }
   }
 </style>
@@ -300,8 +443,14 @@ def _style_axes(axes: plt.Axes, *, grid_axis: str = "x") -> None:
 
 
 def is_simple() -> bool:
-    """``True`` when the dashboard is in farmer-facing plain-language mode."""
-    return bool(st.session_state.get("simple_mode", True))
+    """Whether to address the reader as a farmer rather than an examiner.
+
+    One switch drives both personas: the farmer portal is plain-language mode,
+    and Examiner / AI Mode is its inverse. Keeping it as a single derived
+    predicate means every ``simple``-conditioned string in this file keeps
+    working unchanged.
+    """
+    return not bool(st.session_state.get("examiner_mode", False))
 
 
 def _feature_word(feature: str, simple: bool = True) -> str:
@@ -328,161 +477,470 @@ def _seed_defaults() -> None:
         st.session_state.setdefault(f"in_{name}", float(default))
 
 
-def render_sidebar() -> Dict[str, object]:
-    """Collect every model input. Returns the raw feature dict plus context."""
-    _seed_defaults()
+def _apply_district(district: str) -> None:
+    """Load a district's full seven-feature profile into the input widgets.
 
-    # Farmers are the primary users, so plain language is the default; the
-    # technical register stays one click away rather than being removed.
-    st.sidebar.toggle(
-        "Simple words",
-        value=True,
-        key="simple_mode",
-        help="Off shows the technical wording used in the project report.",
-    )
-    simple = is_simple()
+    Wired to the selector's ``on_change`` so that choosing a district *is* the
+    load -- the previous design needed a separate "load baseline" press, which
+    meant the readings on screen could silently disagree with the district
+    named beside them.
+    """
+    baseline = get_district_baseline(district)
+    climate = get_district_climate(district)
+    st.session_state["baseline"] = baseline
+    st.session_state["climate"] = climate
+    for key, value in district_profile(district).items():
+        st.session_state[f"in_{key}"] = float(np.clip(value, *FEATURE_BOUNDS[key]))
+    # A district load supersedes any earlier live reading.
+    st.session_state.pop("weather", None)
+
+
+def _on_district_change() -> None:
+    _apply_district(st.session_state.get("district_pick", ""))
+
+
+def current_user():
+    """The signed-in user, or None for a guest.
+
+    Resolved from the session token on every run rather than cached: a
+    revoked or expired token must stop working immediately, and an object
+    left in session_state would outlive the session it represents.
+
+    An unreachable database degrades to guest. Everything a guest can do
+    works without persistence, so a storage failure must not lock people out
+    of the recommendation itself.
+    """
+    try:
+        return auth.user_for_token(st.session_state.get("auth_token"))
+    except Exception as exc:  # noqa: BLE001 - never block the app on storage.
+        logging.warning("Could not resolve session: %s", exc)
+        return None
+
+
+def _sign_out() -> None:
+    auth.revoke_token(st.session_state.pop("auth_token", None))
+    for key in ("account_panel", "signin_error"):
+        st.session_state.pop(key, None)
+
+
+def render_account_sidebar(simple: bool) -> None:
+    """Sign in, profile and settings -- all of it in the sidebar.
+
+    Nothing here appears in the recommendation flow. A farmer who never signs
+    in should see one small affordance and nothing else: the app works fully
+    as a guest, and that is the default.
+    """
+    user = current_user()
     st.sidebar.markdown("---")
-    st.sidebar.markdown(f"### {tr('sidebar_place', simple)}")
 
-    districts = cached_districts()
-    district = st.sidebar.selectbox(
-        tr("district", simple),
-        options=districts,
-        index=districts.index("Udupi") if "Udupi" in districts else 0,
-        help=(
-            "We use typical soil readings from your area to fill in the form."
+    # Shown once, immediately after sign-up or a reset. Only the hash is
+    # stored, so there is no second chance to display it.
+    fresh = st.session_state.get("fresh_recovery_code")
+    if fresh:
+        st.sidebar.warning("**Write this down now**")
+        st.sidebar.markdown(
+            f"<div class='gr-code'>{fresh}</div>", unsafe_allow_html=True
+        )
+        st.sidebar.caption(
+            "This is the only way back into your account if you forget your "
+            "PIN. We cannot show it again and we cannot look it up. There is "
+            "no letter O and no number 1 in these codes."
+        )
+        if st.sidebar.button("I have written it down", width="stretch"):
+            st.session_state.pop("fresh_recovery_code", None)
+            st.rerun()
+
+    if user is None:
+        st.sidebar.markdown("#### Your account")
+        st.sidebar.caption(
+            "You do not need an account. Sign in only if you want your saved "
+            "advice on more than one phone."
             if simple
-            else "Selects the NFSM laboratory baseline used to pre-fill soil "
-            "chemistry."
-        ),
-    )
-
-    city = st.sidebar.text_input(
-        "Nearest town" if simple else "Weather station / City", value=district
-    )
-    api_key = st.sidebar.text_input(
-        "Weather key (optional)" if simple else "OpenWeatherMap API key",
-        type="password",
-        help=(
-            "Leave this empty if you do not have one — the app still works."
-            if simple
-            else "Optional. Without a key the system uses calibrated offline "
-            "defaults."
-        ),
-    )
-
-    if st.sidebar.button(tr("get_weather", simple), width="stretch"):
-        reading = get_weather(city, api_key or None)
-        st.session_state["weather"] = reading
-        for key, value in reading.as_dict().items():
-            st.session_state[f"in_{key}"] = float(
-                np.clip(value, *FEATURE_BOUNDS[key])
+            else "Optional. Signing in scopes the ledger to this account."
+        )
+        with st.sidebar.expander("Sign in / Create account", expanded=False):
+            phone = st.text_input("Mobile number", key="signin_phone",
+                                  placeholder="9876543210", max_chars=15)
+            pin = st.text_input(f"{auth.accounts.PIN_LENGTH}-digit PIN",
+                                key="signin_pin", type="password", max_chars=6)
+            name = st.text_input("Your name (new accounts only)",
+                                 key="signin_name")
+            go, make = st.columns(2)
+            if go.button("Sign in", width="stretch"):
+                try:
+                    signed = auth.sign_in(phone, pin)
+                    st.session_state["auth_token"] = auth.issue_token(signed.id)
+                    st.rerun()
+                except auth.AuthError as exc:
+                    st.error(str(exc))
+            if make.button("Create", width="stretch"):
+                try:
+                    created, recovery = auth.register(
+                        phone, pin, display_name=name or None,
+                        district=st.session_state.get("district_pick"))
+                    st.session_state["auth_token"] = auth.issue_token(created.id)
+                    # Shown exactly once. Only its hash is kept, so it can
+                    # never be displayed again.
+                    st.session_state["fresh_recovery_code"] = recovery
+                    st.rerun()
+                except auth.AuthError as exc:
+                    st.error(str(exc))
+            st.caption(
+                "Your PIN is stored scrambled and cannot be read back, even "
+                "by us. Do not use 1234 or your birth year."
             )
 
-    weather = st.session_state.get("weather")
-    if weather is not None:
-        if weather.is_live:
-            st.sidebar.success(
-                f"Live · {weather.city} · {weather.temperature:.1f} °C · "
-                f"{weather.humidity:.0f} % RH"
+        with st.sidebar.expander("Forgot your PIN?", expanded=False):
+            st.caption(
+                "Use the recovery code you wrote down when you created the "
+                "account."
+            )
+            r_phone = st.text_input("Mobile number", key="rec_phone",
+                                    placeholder="9876543210", max_chars=15)
+            r_code = st.text_input("Recovery code", key="rec_code",
+                                   placeholder="ABCD-EFGH", max_chars=12)
+            r_pin = st.text_input("New PIN", key="rec_pin", type="password",
+                                  max_chars=6)
+            if st.button("Reset my PIN", width="stretch", key="rec_go"):
+                try:
+                    restored, replacement = auth.reset_pin_with_code(
+                        r_phone, r_code, r_pin)
+                    st.session_state["auth_token"] = auth.issue_token(
+                        restored.id)
+                    st.session_state["fresh_recovery_code"] = replacement
+                    st.rerun()
+                except auth.AuthError as exc:
+                    st.error(str(exc))
+            st.caption(
+                "Using a code cancels it. You will get a new one to write "
+                "down."
+            )
+        return
+
+    # ---- signed in ------------------------------------------------------
+    st.sidebar.markdown(f"#### 👤 {user.greeting}")
+    st.sidebar.caption(user.masked_phone)
+
+    if st.sidebar.button("Log out", width="stretch"):
+        _sign_out()
+        st.rerun()
+
+    with st.sidebar.expander("Profile", expanded=False):
+        districts = cached_districts()
+        name = st.text_input("Name", value=user.display_name or "",
+                             key="pf_name")
+        village = st.text_input("Village", value=user.village or "",
+                                key="pf_village")
+        index = districts.index(user.district) if user.district in districts else 0
+        district = st.selectbox("Usual district", districts, index=index,
+                                key="pf_district")
+        acres = st.number_input("Usual plot size (acres)", 0.1, 1000.0,
+                                float(user.acres or 1.0), 0.5, key="pf_acres")
+        if st.button("Save profile", width="stretch"):
+            auth.update_profile(user.id, display_name=name or None,
+                                village=village or None, district=district,
+                                acres=float(acres))
+            st.success("Saved.")
+            st.rerun()
+
+    with st.sidebar.expander("My fields", expanded=False):
+        st.caption(
+            "Save each field once, then load it instead of retyping the "
+            "readings."
+        )
+        saved = auth.list_plots(user.id)
+        if saved:
+            picked = st.selectbox(
+                "Your saved fields",
+                options=saved,
+                format_func=lambda p: p.label,
+                key="plot_pick",
+            )
+            st.caption(picked.summary())
+            load, drop = st.columns(2)
+            if load.button("Load", width="stretch", key="plot_load"):
+                # Writing straight into the widget keys is what makes this a
+                # load rather than a suggestion.
+                for feature, value in picked.readings.items():
+                    st.session_state[f"in_{feature}"] = float(
+                        np.clip(value, *FEATURE_BOUNDS[feature]))
+                st.session_state["district_pick"] = picked.district
+                st.session_state["acres"] = float(picked.acres)
+                st.session_state.pop("prediction", None)
+                st.rerun()
+            if drop.button("Delete", width="stretch", key="plot_drop"):
+                auth.delete_plot(user.id, picked.id)
+                st.rerun()
+        else:
+            st.caption("No fields saved yet.")
+
+        st.markdown("---")
+        new_name = st.text_input("Save these readings as", key="plot_name",
+                                 placeholder="North field", max_chars=40)
+        if st.button("Save this field", width="stretch", key="plot_save"):
+            try:
+                auth.save_plot(
+                    user.id,
+                    new_name,
+                    st.session_state.get("district_pick", ""),
+                    float(st.session_state.get("acres", 1.0)),
+                    {f: float(st.session_state[f"in_{f}"])
+                     for f in FEATURE_NAMES},
+                )
+                st.success("Saved.")
+                st.rerun()
+            except auth.PlotError as exc:
+                st.error(str(exc))
+
+    with st.sidebar.expander("Settings", expanded=False):
+        st.caption(
+            "An English-only interface today. Kannada is planned; the crop "
+            "names on your card are already bilingual."
+        )
+        st.markdown("**Change your PIN**")
+        old = st.text_input("Current PIN", type="password", key="pin_old",
+                            max_chars=6)
+        new = st.text_input("New PIN", type="password", key="pin_new",
+                            max_chars=6)
+        if st.button("Change PIN", width="stretch"):
+            try:
+                auth.change_pin(user.id, old, new)
+                st.success("PIN changed.")
+            except auth.AuthError as exc:
+                st.error(str(exc))
+
+        st.markdown("---")
+        st.markdown("**Recovery code**")
+        if auth.has_recovery_code(user.id):
+            st.caption(
+                "You have one. Making a new code cancels the old one, so only "
+                "do this if you have lost it."
             )
         else:
-            st.sidebar.info(
-                "Using typical weather for your area."
-                if simple
-                else f"Offline defaults — {weather.message}"
+            st.caption(
+                "This account has no recovery code — it was made before they "
+                "existed. Make one now, or a forgotten PIN will lock you out "
+                "for good."
             )
+        rc_pin = st.text_input("Your PIN, to confirm", type="password",
+                               key="rc_pin", max_chars=6)
+        if st.button("Make a new recovery code", width="stretch", key="rc_go"):
+            try:
+                st.session_state["fresh_recovery_code"] = (
+                    auth.regenerate_recovery_code(user.id, rc_pin))
+                st.rerun()
+            except auth.AuthError as exc:
+                st.error(str(exc))
 
-    st.sidebar.markdown("---")
-    st.sidebar.markdown(f"### {tr('sidebar_soil', simple)}")
+        st.markdown("---")
+        st.markdown("**Delete my account**")
+        st.caption(
+            "This removes your account, your PIN and your saved plots from "
+            "this device and the server. Advice you saved stays in the "
+            "records, but is no longer linked to you."
+        )
+        confirm = st.text_input('Type DELETE to confirm', key="del_confirm")
+        if st.button("Delete my account permanently", width="stretch"):
+            if confirm.strip().upper() != "DELETE":
+                st.error("Type DELETE in the box to confirm.")
+            else:
+                auth.delete_account(user.id)
+                _sign_out()
+                st.rerun()
 
-    if st.sidebar.button(tr("load_baseline", simple), width="stretch"):
-        baseline = get_district_baseline(district)
-        st.session_state["baseline"] = baseline
-        for key, value in baseline.as_dict().items():
-            st.session_state[f"in_{key}"] = float(np.clip(value, *FEATURE_BOUNDS[key]))
+    with st.sidebar.expander("Help & about", expanded=False):
+        st.markdown(
+            "**What is this?** GREENROOT suggests a crop for your land from "
+            "seven soil and weather readings, and shows how it decided.\n\n"
+            "**Is it a promise?** No. It is advice to help you decide. Check "
+            "with your local agriculture officer before sowing.\n\n"
+            "**Do I need an account?** No. Everything works without one."
+        )
+        st.caption("GREENROOT · 22 crops · advisory output only")
 
+
+def render_controls() -> Dict[str, object]:
+    """The top control bar, in the main area rather than the sidebar.
+
+    A farmer on a phone never opens the sidebar. Everything that has to be
+    touched on a normal run -- where the land is, how big it is, what the
+    weather is doing -- lives here; the seven raw readings stay one tap away
+    in an expander, because most people will accept the district baseline.
+    """
+    _seed_defaults()
+    simple = is_simple()
+    districts = cached_districts()
+
+    if "district_pick" not in st.session_state:
+        st.session_state["district_pick"] = (
+            "Udupi" if "Udupi" in districts else districts[0]
+        )
+        _apply_district(st.session_state["district_pick"])
+
+    # On a phone these four controls stack, and a farmer scrolls past two
+    # full screens of dropdowns before seeing a single word of advice. They
+    # are set once and rarely changed, so they collapse behind a one-line
+    # summary of what they currently say.
+    current = st.session_state.get("district_pick", "")
+    acres_now = float(st.session_state.get("acres", 1.0))
+    season_now = season_lib.SEASONS[
+        st.session_state.get("season", season_lib.KHARIF)
+    ][0]
+    summary = (
+        f"📍 {current}  ·  {acres_now:g} acre"
+        + ("" if acres_now == 1 else "s")
+        + f"  ·  {season_now}"
+    )
+    with st.expander(summary, expanded=False):
+        bar = st.columns([1.3, 0.9, 1.1, 1.2], gap="medium")
+
+        district = bar[0].selectbox(
+            "Your district" if simple else "District",
+            options=districts,
+            key="district_pick",
+            on_change=_on_district_change,
+            help=(
+                "Picking your district fills in the typical soil and weather for "
+                "that area."
+                if simple
+                else "Loads the NFSM survey median where one exists, otherwise "
+                "the curated agro-climatic baseline, plus regional climate "
+                "normals."
+            ),
+        )
+
+        acres = bar[1].number_input(
+            "How many acres?" if simple else "Area (acres)",
+            min_value=0.1,
+            max_value=1000.0,
+            value=float(st.session_state.get("acres", 1.0)),
+            step=0.5,
+            key="acres",
+            help="Fertiliser bags and the money estimate are worked out for this "
+                 "area.",
+        )
+
+        season_keys = list(season_lib.SEASONS)
+        if "season" not in st.session_state:
+            st.session_state["season"] = season_lib.default_season(date.today().month)
+        bar[2].selectbox(
+            "When will you sow?" if simple else "Cropping season",
+            options=season_keys,
+            format_func=lambda key: season_lib.SEASONS[key][0],
+            key="season",
+            help=(
+                "A crop can suit your soil and still be wrong for the time of "
+                "year. We check both."
+                if simple
+                else "Sowing window; used to flag calendar mismatches the edaphic "
+                "model cannot see."
+            ),
+        )
+
+        with bar[3]:
+            weather = st.session_state.get("weather")
+            climate = st.session_state.get("climate")
+            if weather is not None and weather.is_live:
+                st.markdown(
+                    f"<div class='gr-wx live'><div class='k'>LIVE WEATHER</div>"
+                    f"<div class='v'>{weather.temperature:.0f}°C · "
+                    f"{weather.humidity:.0f}% RH</div>"
+                    f"<div class='s'>{weather.city}</div></div>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                where = getattr(climate, "district", district)
+                st.markdown(
+                    f"<div class='gr-wx'><div class='k'>TYPICAL WEATHER</div>"
+                    f"<div class='v'>{st.session_state['in_temperature']:.0f}°C · "
+                    f"{st.session_state['in_humidity']:.0f}% RH</div>"
+                    f"<div class='s'>normals for {where}</div></div>",
+                    unsafe_allow_html=True,
+                )
+            if st.button(
+                "Use live weather" if simple else "Fetch live telemetry",
+                width="stretch",
+                key="fetch_wx",
+            ):
+                reading = get_weather(district, st.session_state.get("wx_key") or None)
+                st.session_state["weather"] = reading
+                for key, value in reading.as_dict().items():
+                    st.session_state[f"in_{key}"] = float(
+                        np.clip(value, *FEATURE_BOUNDS[key])
+                    )
+                if not reading.is_live:
+                    st.toast("No live reading — kept the typical weather.")
+                st.rerun()
+
+    # ---- Manual soil card adjustments, folded away --------------------- #
     baseline = st.session_state.get("baseline")
     if baseline is not None:
-        if baseline.is_survey_backed:
-            st.sidebar.caption(
-                f"Typical of {baseline.sample_count:,} soil tests from "
-                f"{baseline.district}."
-                if simple
-                else f"NFSM median of {baseline.sample_count:,} laboratory "
-                f"samples from {baseline.district}."
-            )
-        else:
-            st.sidebar.caption(
-                f"Typical soil for {baseline.district}."
-                if simple
-                else f"Curated agro-climatic baseline for {baseline.district} "
-                f"(source: {baseline.source})."
-            )
+        provenance = (
+            f"Typical of {baseline.sample_count:,} soil tests from "
+            f"{baseline.district}."
+            if baseline.is_survey_backed and simple
+            else f"NFSM median of {baseline.sample_count:,} laboratory samples "
+            f"from {baseline.district}."
+            if baseline.is_survey_backed
+            else f"Typical soil for {baseline.district} — not from a survey, "
+            f"so correct it below if you have a soil card."
+            if simple
+            else f"Curated agro-climatic baseline for {baseline.district} "
+            f"(source: {baseline.source}); no survey samples for this unit."
+        )
 
     values: Dict[str, float] = {}
-    for name in ("N", "P", "K"):
-        low, high = FEATURE_BOUNDS[name]
-        index = FEATURE_NAMES.index(name)
-        values[name] = st.sidebar.number_input(
-            tr(f"field_{name}", simple)
-            if simple
-            else f"{FEATURE_LABELS[index]} ({FEATURE_UNITS[index]})",
-            min_value=float(low),
-            max_value=float(high),
-            step=1.0,
-            key=f"in_{name}",
-            help=f"Measured in {FEATURE_UNITS[index]}." if simple else None,
+    with st.expander(
+        "Change my soil readings" if simple else "Manual feature override",
+        expanded=False,
+    ):
+        if baseline is not None:
+            st.caption(provenance)
+        soil = st.columns(4)
+        for column, name in zip(soil, ("N", "P", "K")):
+            low, high = FEATURE_BOUNDS[name]
+            index = FEATURE_NAMES.index(name)
+            values[name] = column.number_input(
+                tr(f"field_{name}", simple)
+                if simple
+                else f"{FEATURE_LABELS[index]} ({FEATURE_UNITS[index]})",
+                min_value=float(low),
+                max_value=float(high),
+                step=1.0,
+                key=f"in_{name}",
+            )
+        values["ph"] = soil[3].number_input(
+            tr("field_ph", simple),
+            min_value=float(FEATURE_BOUNDS["ph"][0]),
+            max_value=float(FEATURE_BOUNDS["ph"][1]),
+            step=0.1,
+            key="in_ph",
         )
 
-    values["ph"] = st.sidebar.number_input(
-        tr("field_ph", simple),
-        min_value=float(FEATURE_BOUNDS["ph"][0]),
-        max_value=float(FEATURE_BOUNDS["ph"][1]),
-        step=0.1,
-        key="in_ph",
-    )
+        climate_columns = st.columns(3)
+        for column, name in zip(climate_columns,
+                                ("temperature", "humidity", "rainfall")):
+            low, high = FEATURE_BOUNDS[name]
+            index = FEATURE_NAMES.index(name)
+            values[name] = column.slider(
+                f"{tr(f'field_{name}', simple)} ({FEATURE_UNITS[index]})",
+                min_value=float(low),
+                max_value=float(high),
+                step=0.5,
+                key=f"in_{name}",
+            )
 
-    st.sidebar.markdown(f"### {tr('sidebar_season', simple)}")
-    season_keys = list(season_lib.SEASONS)
-    st.sidebar.selectbox(
-        "When will you sow?" if simple else "Cropping season",
-        options=season_keys,
-        index=season_keys.index(season_lib.default_season(date.today().month)),
-        format_func=lambda key: season_lib.SEASONS[key][0],
-        key="season",
-        help=(
-            "A crop can suit your soil and still be wrong for the time of "
-            "year. We check both."
-            if simple
-            else "Sowing window; used to flag calendar mismatches that the "
-            "edaphic model cannot see."
-        ),
-    )
-    st.sidebar.caption(season_lib.SEASONS[st.session_state["season"]][1])
-
-    st.sidebar.markdown(f"### {tr('sidebar_weather', simple)}")
-    for name in ("temperature", "humidity", "rainfall"):
-        low, high = FEATURE_BOUNDS[name]
-        index = FEATURE_NAMES.index(name)
-        values[name] = st.sidebar.slider(
-            f"{tr(f'field_{name}', simple)} ({FEATURE_UNITS[index]})",
-            min_value=float(low),
-            max_value=float(high),
-            step=0.5,
-            key=f"in_{name}",
+        st.text_input(
+            "Weather key (optional)" if simple else "OpenWeatherMap API key",
+            type="password",
+            key="wx_key",
+            help="Leave empty if you do not have one — the app still works.",
         )
-
-    st.sidebar.markdown("---")
-    st.sidebar.caption(
-        "Close this menu, then press the green button to see your crop."
-        if simple
-        else "Close the sidebar and run the recommendation from the action bar."
-    )
 
     return {
         "district": district,
-        "city": city,
+        "city": district,
+        "acres": float(acres),
         "features": values,
         "season": st.session_state.get("season", season_lib.KHARIF),
     }
@@ -491,19 +949,221 @@ def render_sidebar() -> Dict[str, object]:
 # --------------------------------------------------------------------------- #
 # Tab 1 — Precision Recommendation
 # --------------------------------------------------------------------------- #
+def render_empty_state(simple: bool) -> None:
+    """What the user sees before the first run.
+
+    A stock notice restating the button label wastes the only screen most
+    users will judge the tool on, so this explains what the system actually
+    does — including that it shows its reasoning, which is the point of it.
+    """
+    steps = (
+        [
+            ("Check your readings", "The six numbers above describe your land. "
+             "Change the district at the top, or open the soil card "
+             "expander to correct them."),
+            ("Press the green button", "GREENROOT weighs your soil against "
+             "22 crops and picks the one that fits best."),
+            ("See why, not just what", "It shows which reading decided it, "
+             "what to add to the soil, and whether the season suits."),
+        ]
+        if simple
+        else [
+            ("Set the feature vector", "Seven inputs: N, P, K, pH, temperature, "
+             "humidity and rainfall, bounded and validated on entry."),
+            ("Run the stacking ensemble", "Random Forest, AdaBoost and kNN feed "
+             "a logistic meta-learner over 22 crop classes."),
+            ("Audit the decision", "TreeSHAP and LIME are compared by Jaccard "
+             "overlap at k=3, with Z-score covariate-shift flags."),
+        ]
+    )
+    cards = "".join(
+        f"<div class='gr-step'><div class='n'>{i}</div>"
+        f"<h4>{title}</h4><p>{body}</p></div>"
+        for i, (title, body) in enumerate(steps, start=1)
+    )
+    st.markdown(f"<div class='gr-steps'>{cards}</div>", unsafe_allow_html=True)
+
+
+def _rupees(amount: float) -> str:
+    """Indian digit grouping: 1,23,456 rather than 123,456.
+
+    The Western three-digit grouping is genuinely harder for the intended
+    reader to parse at a glance, and a money figure nobody can read quickly
+    is not doing its job.
+    """
+    negative = amount < 0
+    digits = f"{abs(round(amount)):.0f}"
+    if len(digits) > 3:
+        head, tail = digits[:-3], digits[-3:]
+        parts = []
+        while len(head) > 2:
+            parts.insert(0, head[-2:])
+            head = head[:-2]
+        if head:
+            parts.insert(0, head)
+        digits = ",".join(parts + [tail])
+    return f"{'-' if negative else ''}₹{digits}"
+
+
+def render_commercial_panel(state: Dict[str, object], simple: bool) -> None:
+    """What the crop is worth, what to buy, and when to do it.
+
+    The model answers "which crop"; this answers the three questions a farmer
+    asks immediately afterwards -- what will it earn, what do I carry home
+    from the dealer, and can I spray today.
+    """
+    prediction = state["prediction"]
+    acres = float(state.get("acres") or 1.0)
+    crop = prediction.crop
+
+    base = agronomy.profile(crop)
+    if base is None:
+        # A class with no commercial profile: say so rather than showing
+        # blank cards that look like a loading failure.
+        st.info(
+            f"No price or yield benchmark is on file for {crop.title()}, so "
+            f"the money estimate is not shown. Everything else on this page "
+            f"still applies."
+        )
+        return
+
+    # The benchmark is a starting point, not a quotation. Let them correct it
+    # and have every figure below follow -- a rate they recognise is the
+    # difference between a number they act on and a number they ignore.
+    entered = st.number_input(
+        f"Your mandi rate for {base.english.lower()} (₹ per quintal)"
+        if simple
+        else f"APMC rate override — {base.english} (₹/quintal)",
+        min_value=0.0,
+        max_value=200000.0,
+        value=float(base.price_per_quintal),
+        step=50.0,
+        key=f"price_{crop}",
+        help=f"Benchmark is {_rupees(base.price_per_quintal)}. Change it to "
+             f"your own mandi's rate and the figures below follow.",
+    )
+    override = float(entered) if entered > 0 else None
+    crop_profile = agronomy.with_overrides(crop, price_per_quintal=override)
+    money = crop_profile.economics(acres)
+    if override is not None and abs(override - base.price_per_quintal) > 1:
+        st.caption(
+            f"Using your rate of {_rupees(override)}/quintal instead of the "
+            f"{_rupees(base.price_per_quintal)} benchmark."
+        )
+
+    # ---- Financial ROI -------------------------------------------------- #
+    st.markdown(f"#### {'What this could earn' if simple else 'Benchmark economics'}")
+    roi = st.columns(3)
+    roi[0].metric(
+        "Expected harvest" if simple else "Gross yield",
+        f"{money.yield_quintals:,.0f} quintal"
+        + ("" if abs(money.yield_quintals - 1) < 0.5 else "s"),
+        help=f"{crop_profile.yield_quintal_per_acre:g} quintals per acre "
+             f"× {acres:g} acre(s).",
+    )
+    roi[1].metric(
+        "Mandi rate" if simple else "APMC benchmark",
+        f"{_rupees(crop_profile.price_per_quintal)}/qtl",
+        help="Edit this above if you know your own mandi's rate.",
+    )
+    roi[2].metric(
+        "Money left over" if simple else "Net margin",
+        _rupees(money.net),
+    )
+    roi[2].caption(f"after {_rupees(money.cost)} of costs")
+
+    if money.is_loss:
+        st.warning(
+            "At this rate the crop does not cover its own cost of "
+            "cultivation. Check the mandi rate against your own before you "
+            "commit to it."
+        )
+
+    st.caption(
+        f"Estimate only — {agronomy.BENCHMARK_BASIS}. Mandi rates move every "
+        f"week, and cost of cultivation depends on whether the labour is "
+        f"hired or your own. Put your real rate in the box above to correct "
+        f"this."
+    )
+
+    # ---- Fertiliser bags ------------------------------------------------ #
+    advisory = state.get("advisory")
+    # nutrient_gaps is a signed "observed - required" in kg/ha, so a deficit
+    # is negative. The converter wants a positive requirement; a surplus
+    # means buy nothing, not buy a negative amount.
+    gaps = dict(getattr(advisory, "nutrient_gaps", None) or {})
+    need = {k: max(-float(gaps.get(k, 0.0)), 0.0) for k in ("N", "P", "K")}
+    plan = agronomy.bag_plan(
+        n_kg_per_hectare=need["N"],
+        p_kg_per_hectare=need["P"],
+        k_kg_per_hectare=need["K"],
+        acres=acres,
+    )
+
+    st.markdown(
+        f"#### {'What to buy from the shop' if simple else 'Commercial fertiliser plan'}"
+        f" — {acres:g} acre" + ("" if acres == 1 else "s")
+    )
+    if plan.is_empty:
+        st.success(
+            "Your soil already has enough of all three. Do not buy fertiliser "
+            "for this crop — it would be money wasted."
+        )
+    else:
+        bags = st.columns(3)
+        for column, line in zip(bags, plan.lines):
+            column.metric(
+                f"{line.product}",
+                f"{line.whole_bags} bag" + ("" if line.whole_bags == 1 else "s"),
+            )
+            column.caption(f"{line.grade} · {line.kg:.0f} kg")
+        if plan.nitrogen_from_dap_kg > 0:
+            st.caption(
+                f"The {plan.dap.whole_bags} bag(s) of DAP already carry "
+                f"{plan.nitrogen_from_dap_kg:.0f} kg of nitrogen, which has "
+                f"been taken off the urea above — buying urea for the full "
+                f"nitrogen figure would over-fertilise the field."
+            )
+
+    # ---- Spray advisory ------------------------------------------------- #
+    weather = state.get("weather")
+    features = prediction.raw_features
+    advice = agronomy.spray_advice(
+        rainfall_mm=float(features.get("rainfall", 0.0)),
+        humidity_pct=float(features.get("humidity", 0.0)),
+        temperature_c=float(features.get("temperature", 0.0)),
+        is_live=bool(getattr(weather, "is_live", False)),
+    )
+    spray_heading = "Can I spray today?" if simple else "Today's spray window"
+    st.markdown(f"#### {spray_heading}")
+    renderer = {
+        agronomy.CLEAR: st.success,
+        agronomy.CAUTION: st.warning,
+        agronomy.HOLD: st.error,
+    }[advice.status]
+    renderer(f"{advice.icon} **{advice.headline}** — {advice.detail}")
+
+    # ---- Roadmap -------------------------------------------------------- #
+    st.markdown(
+        f"#### {'Your plan for the season' if simple else 'Crop calendar'}"
+    )
+    stages = agronomy.roadmap(crop)
+    columns = st.columns(len(stages))
+    for column, (index, stage) in zip(columns, enumerate(stages, start=1)):
+        column.markdown(
+            f"<div class='gr-step'><div class='n'>{index}</div>"
+            f"<h4>{stage.name}</h4>"
+            f"<p><b>{stage.when}</b><br>{stage.action}</p></div>",
+            unsafe_allow_html=True,
+        )
+
+
 def render_recommendation_tab(state: Dict[str, object]) -> None:
     """Primary crop card, ranked alternatives, advisory, and Z-score profile."""
     simple = is_simple()
     prediction = state.get("prediction")
     if prediction is None:
-        st.info(
-            "Check your soil readings above, then press **"
-            + tr("run", simple)
-            + "**. To change them, tap ☰ at the top of the screen."
-            if simple
-            else "Configure soil chemistry and microclimate in the sidebar, "
-            "then select **Generate recommendation**."
-        )
+        render_empty_state(simple)
         return
 
     advisory = state["advisory"]
@@ -518,12 +1178,24 @@ def render_recommendation_tab(state: Dict[str, object]) -> None:
             if simple
             else f"{prediction.confidence:.2f}% posterior probability"
         )
+        # A weak match must not be dressed as a strong one. The card loses its
+        # confident green below 60/100 and says so above the crop name, so a
+        # farmer skimming on a phone cannot mistake a coin-flip for an answer.
+        tone = "" if prediction.confidence >= 60 else " unsure"
+        caveat = (
+            ""
+            if prediction.confidence >= 60
+            else f"<div class='warnline'>{'Not a clear answer' if simple else 'Low posterior'}"
+            f" — {'read this with care' if simple else 'treat as indicative'}</div>"
+        )
         st.markdown(
-            f"""<div class="gr-primary">
-                  <div class="gr-sub">{tr('primary_label', simple)}</div>
-                  <div class="crop">{prediction.crop}</div>
-                  <div class="conf">{headline} · {district}</div>
-                </div>""",
+            f'<div class="gr-primary{tone}">'
+            f"{caveat}"
+            f'<div class="gr-sub">{tr("primary_label", simple)}</div>'
+            f'<div class="crop">{prediction.crop}</div>'
+            f'<div class="kn">{agronomy.kannada_name(prediction.crop)}</div>'
+            f'<div class="conf">{headline} · {district}</div>'
+            "</div>",
             unsafe_allow_html=True,
         )
         if simple:
@@ -792,6 +1464,7 @@ def _persist(state: Dict[str, object]) -> None:
     consensus = state.get("consensus")
     features = prediction.raw_features
     try:
+        signed_in = current_user()
         record_id = db_manager.log_transaction(
             district=str(state["district"]),
             n=features["N"],
@@ -805,11 +1478,28 @@ def _persist(state: Dict[str, object]) -> None:
             confidence=prediction.confidence,
             primary_shap_driver=consensus.primary_driver if consensus else None,
             jaccard_index=consensus.jaccard if consensus else None,
+            user_id=signed_in.id if signed_in else None,
         )
     except Exception as exc:  # noqa: BLE001 - surface, never crash the dashboard.
         st.error(f"Could not persist the recommendation: {exc}")
         return
     st.success(f"Committed to the audit ledger as record #{record_id}.")
+
+    # Inside the Android shell, put a copy on the phone itself: the ledger
+    # above lives on the server, and the farmer standing in the field is the
+    # one who needs to read this back with no signal. A no-op in a browser.
+    advisory = state.get("advisory")
+    native.push_card(
+        st,
+        native.build_card(
+            card_id=str(record_id),
+            crop=prediction.crop,
+            confidence=prediction.confidence,
+            district=str(state["district"]),
+            readings=native.readings_summary(features),
+            advice=native.advice_lines(advisory, is_simple()) if advisory else [],
+        ),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -914,9 +1604,11 @@ def render_xai_tab(state: Dict[str, object]) -> None:
                 consensus.consensus_drivers,
             ),
         ):
+            agreed = names is consensus.consensus_drivers
             column.markdown(
-                f"<div class='gr-sub'>{heading}</div>"
-                f"<div class='gr-driver'>{driver_names(names)}</div>",
+                f"<div class='gr-drivercard{' agree' if agreed else ''}'>"
+                f"<div class='k'>{heading}</div>"
+                f"<div class='v'>{driver_names(names)}</div></div>",
                 unsafe_allow_html=True,
             )
 
@@ -958,10 +1650,13 @@ def render_xai_tab(state: Dict[str, object]) -> None:
             )
             _style_axes(axes[index])
         figure.suptitle(
-            f"Why {consensus.predicted_crop} was chosen"
+            f"Why {consensus.predicted_crop.title()} was chosen"
             if simple
-            else f"Local attributions for the {consensus.predicted_crop} decision",
+            else "Local attributions for the "
+            f"{consensus.predicted_crop.title()} decision",
             fontsize=11.5,
+            x=0.01,
+            ha="left",
         )
         figure.tight_layout()
         st.pyplot(figure, width="stretch")
@@ -1045,7 +1740,7 @@ def render_sensitivity_tab(state: Dict[str, object]) -> None:
     # at one end of the range still appear.
     ranked = np.argsort(probabilities.max(axis=0))[::-1][:n_curves]
 
-    figure, axes = plt.subplots(figsize=(8.8, 4.4))
+    figure, axes = plt.subplots(figsize=(8.8, 3.8))
     # Crop identity is categorical: fixed slot order, never a generated or
     # cycled hue, and never a value ramp (viridis would double-encode rank).
     palette = series_palette(len(ranked))
@@ -1076,8 +1771,19 @@ def render_sensitivity_tab(state: Dict[str, object]) -> None:
     )
     axes.set_ylim(-0.02, 1.02)
     # A legend is always present for >= 2 series, so identity is never
-    # carried by colour alone.
-    axes.legend(frameon=False, fontsize=10, ncol=min(len(ranked) + 1, 4))
+    # carried by colour alone. It goes ABOVE the axes: matplotlib's default
+    # loc="best" scores candidate corners for emptiness, and on a sweep where
+    # the curves span the full 0-1 range every corner is occupied, so it lands
+    # on top of the data.
+    axes.legend(
+        loc="lower center",
+        bbox_to_anchor=(0.5, 1.01),
+        ncol=min(len(ranked) + 1, 4),
+        frameon=False,
+        fontsize=10,
+        handlelength=1.6,
+        columnspacing=1.4,
+    )
     _style_axes(axes, grid_axis="y")
     figure.tight_layout()
     st.pyplot(figure, width="stretch")
@@ -1331,18 +2037,36 @@ def render_audit_tab() -> None:
         st.error("Audit database is unavailable in this environment.")
         return
 
-    controls = st.columns([1, 1, 1, 1])
+    # Folded away by default: stacked on a phone these three controls fill
+    # the screen before a single saved record is visible, and the default
+    # window -- the last 30 days -- is the one most people want.
     today = date.today()
-    start = controls[0].date_input("From", value=today - timedelta(days=30))
-    end = controls[1].date_input("To", value=today)
-    limit = controls[2].number_input("Max records", 10, 5000, 200, step=10)
+    with st.expander(
+        "Change the dates" if simple else "Filter the ledger", expanded=False
+    ):
+        controls = st.columns(3)
+        start = controls[0].date_input("From", value=today - timedelta(days=30))
+        end = controls[1].date_input("To", value=today)
+        limit = controls[2].number_input(
+            "How many to show" if simple else "Max records", 10, 5000, 200, step=10
+        )
 
+    # A farmer sees their own records; a guest sees the guest ledger on this
+    # server. Examiner mode is deliberately unscoped -- it is the audit view.
+    viewer = current_user()
+    scope = (
+        {"user_id": viewer.id}
+        if viewer is not None and simple
+        else {"guest_only": True}
+        if simple
+        else {}
+    )
     frame = db_manager.fetch_audit_history(
+        **scope,
         limit=int(limit),
         start_date=str(start),
         end_date=str(end),
     )
-    controls[3].metric("Total records", f"{db_manager.count_records():,}")
 
     if frame.empty:
         st.info(
@@ -1351,23 +2075,52 @@ def render_audit_tab() -> None:
         )
         return
 
-    summary = st.columns(4)
-    summary[0].metric("Records shown", f"{len(frame):,}")
-    summary[1].metric("Mean confidence", f"{frame['confidence'].mean():.1f}%")
-    summary[2].metric("Distinct crops", f"{frame['recommended_crop'].nunique()}")
-    jaccard = pd.to_numeric(frame["jaccard_index"], errors="coerce").dropna()
-    summary[3].metric(
-        "Mean Jaccard", f"{jaccard.mean():.2f}" if not jaccard.empty else "—"
-    )
+    total = db_manager.count_records()
+    if simple:
+        summary = st.columns(3)
+        summary[0].metric(
+            "Advice saved",
+            f"{len(frame):,}",
+            # Only worth saying when the date window is hiding something,
+            # and as a caption: metric deltas always draw a direction arrow.
+            help=f"of {total:,} saved in all" if total != len(frame) else None,
+        )
+        summary[1].metric(
+            "Average match", f"{frame['confidence'].mean():.0f} / 100"
+        )
+        summary[2].metric(
+            "Different crops", f"{frame['recommended_crop'].nunique()}"
+        )
+    else:
+        summary = st.columns(4)
+        summary[0].metric(
+            "Records shown",
+            f"{len(frame):,}",
+            help=f"of {total:,} total" if total != len(frame) else None,
+        )
+        summary[1].metric("Mean confidence", f"{frame['confidence'].mean():.1f}%")
+        summary[2].metric("Distinct crops", f"{frame['recommended_crop'].nunique()}")
+        jaccard = pd.to_numeric(frame["jaccard_index"], errors="coerce").dropna()
+        summary[3].metric(
+            "Mean Jaccard", f"{jaccard.mean():.2f}" if not jaccard.empty else "—"
+        )
 
-    st.dataframe(frame, hide_index=True, width="stretch", height=380)
+    st.dataframe(
+        db.farmer_view(frame) if simple else db.examiner_view(frame),
+        hide_index=True,
+        width="stretch",
+        height=db.table_height(len(frame)),
+    )
 
     # Reload a past reading into the form. An officer revisiting a plot should
     # not have to retype seven numbers off a printout.
     reload_columns = st.columns([2, 1])
     options = {
-        f"#{int(row['id'])} · {row['district']} · {row['recommended_crop']} "
-        f"· {str(row['timestamp'])[:10]}": row
+        (
+            f"#{int(row['id'])} · {row['district']} · "
+            f"{str(row['recommended_crop']).title()} · "
+            f"{db.record_date(row['timestamp'], simple)}"
+        ): row
         for _, row in frame.iterrows()
     }
     chosen = reload_columns[0].selectbox(
@@ -1397,14 +2150,18 @@ def render_audit_tab() -> None:
     buffer = io.StringIO()
     frame.to_csv(buffer, index=False)
     st.download_button(
-        "⬇️ Download audit trail (CSV)",
+        "⬇️ Download all of this (CSV)" if simple
+        else "⬇️ Download audit trail (CSV)",
         data=buffer.getvalue(),
         file_name=f"greenroot_audit_{datetime.now():%Y%m%d_%H%M}.csv",
         mime="text/csv",
         width="stretch",
     )
 
-    with st.expander("Distribution by recommended crop"):
+    with st.expander(
+        "Which crops came up most" if simple
+        else "Distribution by recommended crop"
+    ):
         counts = frame["recommended_crop"].value_counts()
         figure, axes = plt.subplots(figsize=(9, max(2.4, 0.34 * len(counts))))
         axes.barh(counts.index[::-1], counts.to_numpy()[::-1], color=ACCENT, height=0.6)
@@ -1529,7 +2286,27 @@ def main() -> None:
     if recommender is None:
         st.stop()
 
-    inputs = render_sidebar()
+    st.sidebar.markdown("### GREENROOT")
+    st.sidebar.toggle(
+        "👨‍🏫 Examiner / AI Mode",
+        value=False,
+        key="examiner_mode",
+        help="Off: the farmer portal. On: the model-audit deck — probability "
+             "distribution, Z-scores, SHAP/LIME consensus, sensitivity "
+             "curves and the raw ledger.",
+    )
+    st.sidebar.caption(
+        "Examiner mode shows the evidence behind the recommendation: "
+        "explainer agreement, calibration and the audit trail."
+        if not is_simple()
+        else "Turn this on to see how the model reached its answer."
+    )
+
+    # Must precede the account panel: that panel reads the users and
+    # sessions tables, which do not exist until the schema is initialised.
+    ensure_database()
+    render_account_sidebar(is_simple())
+    inputs = render_controls()
     simple = is_simple()
 
     tagline = (
@@ -1539,41 +2316,41 @@ def main() -> None:
         f"auditing · {REPORTED_CV_ACCURACY * 100:.2f}% stratified 5-fold "
         f"cross-validated accuracy across 22 crop classes"
     )
-    st.markdown(
-        f"""<div class="gr-hero">
-              <h1>🌱 GREENROOT</h1>
-              <p>{tagline}</p>
-            </div>""",
-        unsafe_allow_html=True,
+    features: Dict[str, float] = inputs["features"]  # type: ignore[assignment]
+    # The readings live in the hero. Before a run there is nothing else to
+    # show, and a banner holding only a title leaves a blank slab above the
+    # fold; this also gives the numbers room to be legible at arm's length.
+    reads = [
+        ("Nitrogen", f"{features['N']:.0f}", "kg/ha"),
+        ("Phosphorus", f"{features['P']:.0f}", "kg/ha"),
+        ("Potassium", f"{features['K']:.0f}", "kg/ha"),
+        ("Soil pH", f"{features['ph']:.1f}", ""),
+        ("Temperature", f"{features['temperature']:.0f}", "°C"),
+        ("Rainfall", f"{features['rainfall']:.0f}", "mm"),
+    ]
+    tiles = "".join(
+        f"<div class='gr-read'><div class='k'>{label}</div>"
+        f"<div class='v'>{value}<small>{unit}</small></div></div>"
+        for label, value, unit in reads
     )
 
+    # The hero and the hint below it both depend on whether there is an
+    # answer yet -- but the answer is computed further down, and st.tabs
+    # renders every tab in a single pass and switches between them on the
+    # client, so no rerun happens when the farmer changes tab. Reading
+    # session_state here would leave the banner a full run behind. Reserve
+    # the slots now and fill them once the prediction is known.
+    hero_slot = st.empty()
     bar_left, bar_right = st.columns([2.2, 1], gap="medium")
-    with bar_left:
-        features = inputs["features"]
-        st.markdown(
-            f"<div class='gr-readout'>"
-            f"<b>{inputs['district']}</b> · "
-            f"N {features['N']:.0f} · P {features['P']:.0f} · "
-            f"K {features['K']:.0f} · pH {features['ph']:.1f} · "
-            f"{features['temperature']:.0f}°C · {features['rainfall']:.0f} mm"
-            f"</div>"
-            f"<div class='gr-readout-hint'>"
-            + (
-                "Tap ☰ at the top to change these."
-                if simple
-                else "Adjust inputs in the sidebar."
-            )
-            + "</div>",
-            unsafe_allow_html=True,
-        )
+    hint_slot = bar_left.empty()
     with bar_right:
         main_run = st.button(
             tr("run", simple), type="primary", width="stretch", key="run_main"
         )
+
     ensure_database()
 
     if main_run:
-        features: Dict[str, float] = inputs["features"]  # type: ignore[assignment]
         vector = [features[name] for name in FEATURE_NAMES]
         try:
             prediction = recommender.predict(vector, top_k=3)
@@ -1609,30 +2386,126 @@ def main() -> None:
         "district": st.session_state.get("district", inputs["district"]),
         "season": inputs["season"],
         "recommender": recommender,
+        "acres": inputs["acres"],
+        "weather": st.session_state.get("weather"),
+        "price_override": st.session_state.get("price_override"),
     }
 
-    tabs = st.tabs(
-        [
-            tr("tab_recommend", simple),
-            tr("tab_why", simple),
-            tr("tab_whatif", simple),
-            tr("tab_bulk", simple),
-            tr("tab_records", simple),
-            tr("tab_card", simple),
-        ]
-    )
-    with tabs[0]:
-        render_recommendation_tab(state)
-    with tabs[1]:
-        render_xai_tab(state)
-    with tabs[2]:
-        render_sensitivity_tab(state)
-    with tabs[3]:
-        render_bulk_tab()
-    with tabs[4]:
-        render_audit_tab()
-    with tabs[5]:
-        render_card_tab(state)
+    # Both slots are filled here, after the run handler: this is the first
+    # point in the script where "is there an answer" is finally true or false.
+    answered = st.session_state.get("prediction")
+    if answered is None:
+        hero_slot.markdown(
+            f"""<div class="gr-hero">
+                  <div class="gr-hero-top">
+                    <h1>🌱 GREENROOT</h1>
+                    <span class="gr-hero-place">{inputs['district']}</span>
+                  </div>
+                  <p>{tagline}</p>
+                  <div class="gr-reads">{tiles}</div>
+                </div>""",
+            unsafe_allow_html=True,
+        )
+        hint_slot.markdown(
+            "<div class='gr-readout-hint'>"
+            + (
+                "These are your land's readings. Change your district "
+                "above if they are wrong, then press the green button."
+                if simple
+                else "Set the district above, or override features in the "
+                "manual expander."
+            )
+            + "</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        band = confidence_band(answered.confidence)
+        score = (
+            f"{band.label} \u00b7 {answered.confidence:.0f} out of 100"
+            if simple
+            else f"{answered.confidence:.2f}% posterior"
+        )
+        # Collapsed: at full height this banner repeats on all six tabs and,
+        # on a phone, pushes every tab's content below the fold.
+        hero_tone = "" if answered.confidence >= 60 else " gr-hero-unsure"
+        hero_slot.markdown(
+            f"""<div class="gr-hero gr-hero-compact{hero_tone}">
+                  <div class="gr-hero-top">
+                    <h1>🌱 GREENROOT</h1>
+                    <span class="gr-hero-place">{inputs['district']}</span>
+                  </div>
+                  <div class="gr-hero-answer">
+                    <span class="crop">{answered.crop}</span>
+                    <span class="score">{score}</span>
+                  </div>
+                  <div class="gr-hero-reads">{
+                      native.readings_summary(features)}</div>
+                </div>""",
+            unsafe_allow_html=True,
+        )
+        hint_slot.markdown(
+            "<div class='gr-readout-hint'>"
+            + (
+                "Changed something? Edit your readings at the top, then "
+                "press the button again."
+                if simple
+                else "Change the inputs above and re-run to refresh every "
+                "tab."
+            )
+            + "</div>",
+            unsafe_allow_html=True,
+        )
+
+    # Two audiences, two decks. The farmer portal leads with what to do;
+    # the examiner deck leads with why to believe it. Everything is still
+    # reachable in both -- the toggle changes the order and the wording, not
+    # what the system is willing to show.
+    if simple:
+        # Two tabs, not five. A farmer wants one answer -- which crop, what
+        # to buy, when to do it -- and splitting that across three screens
+        # made them hunt for the half they needed. The explainer-consensus
+        # screen is gone from this view entirely: Jaccard agreement between
+        # TreeSHAP and LIME is an examiner's question, not a farmer's. It is
+        # still computed, and still one toggle away in Examiner mode.
+        tabs = st.tabs(["🌱 Your Advice", "🗂️ Saved & Card"])
+        with tabs[0]:
+            render_recommendation_tab(state)
+            if state.get("prediction") is not None:
+                st.markdown("---")
+                render_commercial_panel(state, simple)
+        with tabs[1]:
+            render_card_tab(state)
+            st.markdown("---")
+            render_audit_tab()
+    else:
+        tabs = st.tabs(
+            [
+                "🎯 Prediction & Z-scores",
+                "🔍 XAI Consensus",
+                "🧭 What-If Sensitivity",
+                "💰 Commercial Model",
+                "📦 Bulk Advisory",
+                "📋 Audit Trail",
+                "🧾 Soil Health Card",
+            ]
+        )
+        with tabs[0]:
+            render_recommendation_tab(state)
+        with tabs[1]:
+            render_xai_tab(state)
+        with tabs[2]:
+            render_sensitivity_tab(state)
+        with tabs[3]:
+            if state.get("prediction") is None:
+                st.info("Generate a recommendation to price it.")
+            else:
+                render_commercial_panel(state, simple)
+        with tabs[4]:
+            render_bulk_tab()
+        with tabs[5]:
+            render_audit_tab()
+        with tabs[6]:
+            render_card_tab(state)
 
     st.markdown("---")
     st.caption(

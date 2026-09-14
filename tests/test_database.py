@@ -252,6 +252,7 @@ class TestConstraintsAndRollback:
                     (
                         "2025-01-01T00:00:00", "Udupi", 1.0, 1.0, 1.0, 6.0,
                         20.0, 50.0, 100.0, "rice", 50.0, "N", 0.5,
+                        None,   # user_id: a guest row
                     ),
                 )
                 raise RuntimeError("simulated mid-transaction failure")

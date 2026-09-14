@@ -17,6 +17,14 @@ crop_recommendations.db-shm
 # The three protected artefacts in models/ are tracked; this one is not.
 models/xai_surrogate.pkl
 
+# Credentials. Nothing here uses these yet, but the moment accounts land,
+# an API key or a password hash committed by accident cannot be un-published
+# from a public repository. Ignored in advance, deliberately.
+.streamlit/secrets.toml
+.env
+*.pem
+*.key
+
 # Tooling caches
 .pytest_cache/
 .coverage

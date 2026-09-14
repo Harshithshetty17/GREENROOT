@@ -1,0 +1,25 @@
+# GREENROOT dashboard theme.
+#
+# Without this file Streamlit paints every button, slider and toggle in its
+# default red, which fights the green brand used throughout the charts, the
+# Soil Health Card and the PDF export.
+
+[theme]
+base = "light"
+primaryColor = "#1F7A4D"              # brand green: buttons, sliders, focus
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F4F8F5"  # sidebar and panel surface
+textColor = "#14281D"
+linkColor = "#1F7A4D"
+font = "sans-serif"
+baseRadius = "0.6rem"
+borderColor = "#D9E3DC"
+showWidgetBorder = true
+
+[server]
+# A whole district's soil survey is still a small file; keep the default
+# ceiling rather than inviting multi-hundred-megabyte uploads.
+maxUploadSize = 50
+
+[browser]
+gatherUsageStats = false

@@ -1,0 +1,2 @@
+trials,mean_ms,std_ms,min_ms,p50_ms,p95_ms,p99_ms,max_ms,throughput_hz
+15.0,15.5065,0.6408,14.7265,15.3687,16.6777,16.8892,16.942,64.4891

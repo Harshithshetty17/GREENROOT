@@ -1,0 +1,4 @@
+protocol,mean_accuracy,std_accuracy,leak_free
+global scaler before CV (as train.py),0.994091,0.004129,False
+scaler re-fitted inside each fold,0.994091,0.004129,True
+optimism (leaky - clean),0.0,,

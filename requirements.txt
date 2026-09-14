@@ -1,0 +1,33 @@
+# GREENROOT — Intelligent Precision Agriculture Decision Support System
+# Python 3.10+  ·  install with:  pip install -r requirements.txt
+
+# --- Core scientific stack -------------------------------------------------
+# scikit-learn is pinned exactly: the artefacts in models/ were serialised
+# under 1.9.0, and unpickling an estimator across a minor version boundary
+# can silently alter behaviour or fail outright.
+scikit-learn==1.9.0
+numpy>=1.26
+pandas>=2.0
+scipy>=1.11
+joblib>=1.3
+
+# --- Explainability --------------------------------------------------------
+shap>=0.44
+lime>=0.2.0.1
+
+# --- Presentation ----------------------------------------------------------
+# >=1.50 for the `width="stretch"` widget API used throughout app.py.
+streamlit>=1.50
+matplotlib>=3.8
+
+# --- Reporting & I/O -------------------------------------------------------
+# fpdf2   : pure-Python PDF generation for the printable Soil Health Card.
+# openpyxl: lets the bulk-advisory tab accept .xlsx survey sheets.
+fpdf2>=2.7
+openpyxl>=3.1
+
+# --- Services --------------------------------------------------------------
+requests>=2.31
+
+# --- Verification ----------------------------------------------------------
+pytest>=7.4

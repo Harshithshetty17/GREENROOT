@@ -19,7 +19,7 @@ reimplemented here. This module is the presentation seam on top of it.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
 import pandas as pd
 
@@ -46,32 +46,54 @@ FARMER_COLUMNS = [
 TECHNICAL_ONLY = ("primary_shap_driver", "jaccard_index")
 
 
-def record_date(stamp: object, simple: bool) -> str:
+def _headers(language: str) -> List[str]:
+    """Column names for the farmer table, in the reader's language."""
+    from src.utils.i18n import KANNADA_LEDGER_COLUMNS, KANNADA, normalise
+
+    if normalise(language) != KANNADA:
+        return list(FARMER_COLUMNS)
+    return [KANNADA_LEDGER_COLUMNS.get(name, name) for name in FARMER_COLUMNS]
+
+
+def record_date(stamp: object, simple: bool, language: str = "en") -> str:
     """A saved record's date, in the register the reader is addressed in.
 
     Technical mode keeps the ISO form, which is what the ledger stores and
     what an examiner will want to match against the database.
     """
+    from src.utils.i18n import short_date
+
     parsed = pd.to_datetime(stamp, errors="coerce")
     if pd.isna(parsed):
         return "unknown date" if simple else str(stamp)[:10]
-    return f"{parsed:%d %b %Y}" if simple else f"{parsed:%Y-%m-%d}"
+    if not simple:
+        return f"{parsed:%Y-%m-%d}"
+    return short_date(parsed.to_pydatetime(), language) or "unknown date"
 
 
-def farmer_view(frame: pd.DataFrame) -> pd.DataFrame:
+def farmer_view(frame: pd.DataFrame, language: str = "en") -> pd.DataFrame:
     """The ledger as a farmer can read it.
 
     Localised dates, an integer score out of 100, plain column names, and
     none of :data:`TECHNICAL_ONLY`.
+
+    ``language`` translates the headers and the crop names. The frame is
+    built in English either way and renamed at the end, so the column keys
+    used above stay readable and there is one place where the two sets of
+    names are mapped to each other.
     """
+    from src.utils.agronomy import kannada_name
+    from src.utils.i18n import KANNADA, normalise, short_date
+
     if frame.empty:
-        return pd.DataFrame(columns=FARMER_COLUMNS)
+        return pd.DataFrame(columns=_headers(language))
 
     view = pd.DataFrame(
         {
             "Saved on": pd.to_datetime(
                 frame["timestamp"], errors="coerce"
-            ).dt.strftime("%d %b %Y"),
+            ).map(lambda moment: None if pd.isna(moment)
+                  else short_date(moment.to_pydatetime(), language)),
             "Place": frame["district"],
             "Crop": frame["recommended_crop"].astype(str).str.title(),
             "Match": frame["confidence"].round().astype("Int64").astype(str)
@@ -84,7 +106,13 @@ def farmer_view(frame: pd.DataFrame) -> pd.DataFrame:
         }
     )
     # An unparseable timestamp would otherwise render as the string "NaT".
-    return view.assign(**{"Saved on": view["Saved on"].fillna("unknown")})
+    unknown = "ಗೊತ್ತಿಲ್ಲ" if normalise(language) == KANNADA else "unknown"
+    view = view.assign(**{"Saved on": view["Saved on"].fillna(unknown)})
+
+    if normalise(language) == KANNADA:
+        view["Crop"] = [kannada_name(str(name).lower()) for name in view["Crop"]]
+        view.columns = _headers(language)
+    return view
 
 
 def examiner_view(frame: pd.DataFrame) -> pd.DataFrame:

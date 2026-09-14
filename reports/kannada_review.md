@@ -5,7 +5,7 @@ Please read each Kannada line against its English and mark anything that is wron
 This is agronomic advice people act on in a field, so a wrong word has a real cost. The English is the source of truth; the Kannada was written by someone who does not speak the language.
 
 - Interface strings translated: **45 of 55**
-- Extra strings: **30**
+- Extra strings: **47**
 - Crop names: **22**, of which **16** are already corroborated against the government soil survey shipped with the project (marked ✅ below — these need the least attention)
 
 **If you only have time for one section, read _Field instructions_.** Those are the lines a farmer acts on with a bag of fertiliser in hand; everything else is navigation, and a clumsy button is recoverable in a way a wrong dose is not.
@@ -65,49 +65,66 @@ This is agronomic advice people act on in a field, so a wrong word has a real co
 
 | | English | Kannada | Correction |
 |---|---|---|---|
-|  | _(no English equivalent)_ | ನಿಮ್ಮ ಖಾತೆ | |
-|  | _(no English equivalent)_ | ಎಕರೆ | |
-|  | _(no English equivalent)_ | ಚೀಲ | |
-|  | _(no English equivalent)_ | ಇಂದು ಸಿಂಪಡಿಸಬಹುದೇ? | |
-|  | _(no English equivalent)_ | ನನ್ನ ಮಣ್ಣಿನ ಅಳತೆ ಬದಲಿಸಿ | |
-|  | _(no English equivalent)_ | ಏನಾದರೂ ಬದಲಾಯಿತೇ? ಮೇಲೆ ನಿಮ್ಮ ಅಳತೆ ಸರಿಪಡಿಸಿ, ನಂತರ ಮತ್ತೆ ಒತ್ತಿ. | |
-|  | _(no English equivalent)_ | ನಿರೀಕ್ಷಿತ ಇಳುವರಿ | |
-|  | _(no English equivalent)_ | ಎಷ್ಟು ಎಕರೆ? | |
-|  | _(no English equivalent)_ | ಭಾಷೆ | |
-|  | _(no English equivalent)_ | ಈಗಿನ ಹವಾಮಾನ | |
-|  | _(no English equivalent)_ | ಹೊರಗೆ ಹೋಗಿ | |
-|  | _(no English equivalent)_ | ಮಂಡಿ ದರ | |
-|  | _(no English equivalent)_ | ಉಳಿಯುವ ಹಣ | |
-|  | _(no English equivalent)_ | ಸ್ಪಷ್ಟ ಉತ್ತರ ಅಲ್ಲ — ಎಚ್ಚರಿಕೆಯಿಂದ ಓದಿ | |
-|  | _(no English equivalent)_ | ಈ ದಿನಾಂಕಗಳು ನೀವು ಸಲಹೆ ಉಳಿಸಿದ ದಿನದಿಂದ ಲೆಕ್ಕ ಹಾಕಿದವು, ನೀವು ನಿಜವಾಗಿ ಬಿತ್ತಿದ ದಿನದಿಂದ ಅಲ್ಲ — ಹಾಗಾಗಿ ಇವು ಸರಿಸುಮಾರು, ನಿಖರವಲ್ಲ. | |
-|  | _(no English equivalent)_ | 🗂️ ಉಳಿಸಿದವು ಮತ್ತು ಕಾರ್ಡ್ | |
-|  | _(no English equivalent)_ | ಈ ಕಾಲದ ನಿಮ್ಮ ಯೋಜನೆ | |
-|  | _(no English equivalent)_ | ಅಥವಾ ಪಠ್ಯವನ್ನು ನಕಲಿಸಿ | |
-|  | _(no English equivalent)_ | ಈ ಸಲಹೆಯನ್ನು ಹಂಚಿಕೊಳ್ಳಿ | |
-|  | _(no English equivalent)_ | 📤 ವಾಟ್ಸಾಪ್‌ನಲ್ಲಿ ಕಳುಹಿಸಿ | |
-|  | _(no English equivalent)_ | ಒಳಗೆ ಬನ್ನಿ | |
-|  | _(no English equivalent)_ | ಇವು ನಿಮ್ಮ ಜಮೀನಿನ ಅಳತೆಗಳು. ತಪ್ಪಿದ್ದರೆ ಮೇಲೆ ಜಿಲ್ಲೆ ಬದಲಿಸಿ, ನಂತರ ಹಸಿರು ಗುಂಡಿ ಒತ್ತಿ. | |
-|  | _(no English equivalent)_ | ಸಾಮಾನ್ಯ ಹವಾಮಾನ | |
-|  | _(no English equivalent)_ | ಈಗಿನ ಹವಾಮಾನ ಬಳಸಿ | |
-|  | _(no English equivalent)_ | ಇದರಿಂದ ಎಷ್ಟು ಸಿಗಬಹುದು | |
-|  | _(no English equivalent)_ | ಅಂಗಡಿಯಿಂದ ಏನು ತರಬೇಕು | |
-|  | _(no English equivalent)_ | ಮುಂದೆ ಏನು ಮಾಡಬೇಕು | |
-|  | _(no English equivalent)_ | ಯಾವಾಗ ಬಿತ್ತುತ್ತೀರಿ? | |
-|  | _(no English equivalent)_ | 🌱 ನಿಮ್ಮ ಸಲಹೆ | |
-|  | _(no English equivalent)_ | ನಿಮ್ಮ ಜಿಲ್ಲೆ | |
+|  | Your account | ನಿಮ್ಮ ಖಾತೆ | |
+|  | acre / acres | ಎಕರೆ | |
+|  | Saved. You can find it under Saved & Card. | ಉಳಿಸಲಾಗಿದೆ. "ಉಳಿಸಿದವು ಮತ್ತು ಕಾರ್ಡ್" ನಲ್ಲಿ ನೋಡಬಹುದು. | |
+|  | Advice saved | ಉಳಿಸಿದ ಸಲಹೆಗಳು | |
+|  | Average match | ಸರಾಸರಿ ಹೊಂದಾಣಿಕೆ | |
+|  | bag / bags | ಚೀಲ | |
+|  | Can I spray today? | ಇಂದು ಸಿಂಪಡಿಸಬಹುದೇ? | |
+|  | English is retained beside every Kannada term, so a translation error cannot silently change the advice. Translations are a prototype mapping and need native-speaker review before field use. | ಪ್ರತಿ ಕನ್ನಡ ಪದದ ಪಕ್ಕದಲ್ಲಿ ಇಂಗ್ಲಿಷ್ ಕೂಡ ಇರುತ್ತದೆ, ಹಾಗಾಗಿ ಅನುವಾದ ತಪ್ಪಾದರೂ ಸಲಹೆ ಬದಲಾಗುವುದಿಲ್ಲ. ಈ ಅನುವಾದಗಳನ್ನು ಕನ್ನಡ ಬಲ್ಲವರು ಇನ್ನೂ ಪರಿಶೀಲಿಸಿಲ್ಲ. | |
+|  | The PDF is English-only: its built-in fonts cannot render Kannada. Download the HTML for a printout in both languages. | PDF ಇಂಗ್ಲಿಷ್‌ನಲ್ಲಿ ಮಾತ್ರ ಇರುತ್ತದೆ — ಅದರ ಅಕ್ಷರಗಳಲ್ಲಿ ಕನ್ನಡ ಮೂಡುವುದಿಲ್ಲ. ಎರಡೂ ಭಾಷೆಯ ಪ್ರತಿಗಾಗಿ HTML ಇಳಿಸಿಕೊಳ್ಳಿ. | |
+|  | Print this and keep it, or show it to your agriculture officer. | ಇದನ್ನು ಮುದ್ರಿಸಿ ಇಟ್ಟುಕೊಳ್ಳಿ, ಅಥವಾ ನಿಮ್ಮ ಕೃಷಿ ಅಧಿಕಾರಿಗೆ ತೋರಿಸಿ. | |
+|  | Change the dates | ದಿನಾಂಕ ಬದಲಿಸಿ | |
+|  | Change my soil readings | ನನ್ನ ಮಣ್ಣಿನ ಅಳತೆ ಬದಲಿಸಿ | |
+|  | Changed something? Edit your readings at the top, then press the button again. | ಏನಾದರೂ ಬದಲಾಯಿತೇ? ಮೇಲೆ ನಿಮ್ಮ ಅಳತೆ ಸರಿಪಡಿಸಿ, ನಂತರ ಮತ್ತೆ ಒತ್ತಿ. | |
+|  | Checking the answer… | ಉತ್ತರ ಪರಿಶೀಲಿಸಲಾಗುತ್ತಿದೆ… | |
+|  | Different crops | ಬೇರೆ ಬೇರೆ ಬೆಳೆಗಳು | |
+|  | ⬇️ Download all of this (CSV) | ⬇️ ಎಲ್ಲವನ್ನೂ ಇಳಿಸಿಕೊಳ್ಳಿ (CSV) | |
+|  | Expected harvest | ನಿರೀಕ್ಷಿತ ಇಳುವರಿ | |
+|  | How many acres? | ಎಷ್ಟು ಎಕರೆ? | |
+|  | Language | ಭಾಷೆ | |
+|  | LIVE WEATHER | ಈಗಿನ ಹವಾಮಾನ | |
+|  | ↩️ Load these readings | ↩️ ಈ ಅಳತೆಗಳನ್ನು ತನ್ನಿ | |
+|  | Log out | ಹೊರಗೆ ಹೋಗಿ | |
+|  | Mandi rate | ಮಂಡಿ ದರ | |
+|  | Money left over | ಉಳಿಯುವ ಹಣ | |
+|  | Nothing saved in these dates. Press the green button at the top to get advice, then save it — it will show up here. | ಈ ದಿನಾಂಕಗಳಲ್ಲಿ ಏನೂ ಉಳಿಸಿಲ್ಲ. ಮೇಲಿನ ಹಸಿರು ಗುಂಡಿ ಒತ್ತಿ ಸಲಹೆ ಪಡೆಯಿರಿ, ನಂತರ ಅದನ್ನು ಉಳಿಸಿ — ಅದು ಇಲ್ಲಿ ಕಾಣಿಸುತ್ತದೆ. | |
+|  | Saving is not working on this server right now. Your advice is still on screen — take a photo of it, or use Share below. | ಈಗ ಈ ಸರ್ವರ್‌ನಲ್ಲಿ ಉಳಿಸಲು ಆಗುತ್ತಿಲ್ಲ. ನಿಮ್ಮ ಸಲಹೆ ಪರದೆಯ ಮೇಲೆ ಇದೆ — ಫೋಟೊ ತೆಗೆದಿಟ್ಟುಕೊಳ್ಳಿ, ಅಥವಾ ಕೆಳಗಿನ ಹಂಚಿಕೆ ಬಳಸಿ. | |
+|  | Not a clear answer | ಸ್ಪಷ್ಟ ಉತ್ತರ ಅಲ್ಲ — ಎಚ್ಚರಿಕೆಯಿಂದ ಓದಿ | |
+|  | Open a saved reading | ಉಳಿಸಿದ ಒಂದನ್ನು ತೆರೆಯಿರಿ | |
+|  | Every piece of advice you saved is kept here, with the readings it was based on. | ನೀವು ಉಳಿಸಿದ ಪ್ರತಿ ಸಲಹೆಯೂ ಇಲ್ಲಿ ಇರುತ್ತದೆ, ಅದಕ್ಕೆ ಆಧಾರವಾದ ಅಳತೆಗಳ ಜೊತೆಗೆ. | |
+|  | These dates are worked out from the day you saved the advice, not the day you actually sowed — so treat them as close, not exact. | ಈ ದಿನಾಂಕಗಳು ನೀವು ಸಲಹೆ ಉಳಿಸಿದ ದಿನದಿಂದ ಲೆಕ್ಕ ಹಾಕಿದವು, ನೀವು ನಿಜವಾಗಿ ಬಿತ್ತಿದ ದಿನದಿಂದ ಅಲ್ಲ — ಹಾಗಾಗಿ ಇವು ಸರಿಸುಮಾರು, ನಿಖರವಲ್ಲ. | |
+|  | Could not save it. Your advice is still on screen — take a photo of it, or use Share below. | ಉಳಿಸಲು ಆಗಲಿಲ್ಲ. ನಿಮ್ಮ ಸಲಹೆ ಪರದೆಯ ಮೇಲೆ ಇದೆ — ಫೋಟೊ ತೆಗೆದಿಟ್ಟುಕೊಳ್ಳಿ, ಅಥವಾ ಕೆಳಗಿನ ಹಂಚಿಕೆ ಬಳಸಿ. | |
+|  | 🗂️ Saved & Card | 🗂️ ಉಳಿಸಿದವು ಮತ್ತು ಕಾರ್ಡ್ | |
+|  | Your plan for the season | ಈ ಕಾಲದ ನಿಮ್ಮ ಯೋಜನೆ | |
+|  | Or copy the text | ಅಥವಾ ಪಠ್ಯವನ್ನು ನಕಲಿಸಿ | |
+|  | Share this advice | ಈ ಸಲಹೆಯನ್ನು ಹಂಚಿಕೊಳ್ಳಿ | |
+|  | 📤 Send on WhatsApp | 📤 ವಾಟ್ಸಾಪ್‌ನಲ್ಲಿ ಕಳುಹಿಸಿ | |
+|  | Sign in | ಒಳಗೆ ಬನ್ನಿ | |
+|  | These are your land's readings. Change your district above if they are wrong, then press the green button. | ಇವು ನಿಮ್ಮ ಜಮೀನಿನ ಅಳತೆಗಳು. ತಪ್ಪಿದ್ದರೆ ಮೇಲೆ ಜಿಲ್ಲೆ ಬದಲಿಸಿ, ನಂತರ ಹಸಿರು ಗುಂಡಿ ಒತ್ತಿ. | |
+|  | TYPICAL WEATHER | ಸಾಮಾನ್ಯ ಹವಾಮಾನ | |
+|  | Use live weather | ಈಗಿನ ಹವಾಮಾನ ಬಳಸಿ | |
+|  | What this could earn | ಇದರಿಂದ ಎಷ್ಟು ಸಿಗಬಹುದು | |
+|  | What to buy from the shop | ಅಂಗಡಿಯಿಂದ ಏನು ತರಬೇಕು | |
+|  | What to do next | ಮುಂದೆ ಏನು ಮಾಡಬೇಕು | |
+|  | When will you sow? | ಯಾವಾಗ ಬಿತ್ತುತ್ತೀರಿ? | |
+|  | Which crops came up most | ಯಾವ ಬೆಳೆ ಹೆಚ್ಚು ಬಂತು | |
+|  | 🌱 Your Advice | 🌱 ನಿಮ್ಮ ಸಲಹೆ | |
+|  | Your district | ನಿಮ್ಮ ಜಿಲ್ಲೆ | |
 
 ## Confidence
 
 | | English | Kannada | Correction |
 |---|---|---|---|
 |  | Very good match | ತುಂಬಾ ಒಳ್ಳೆಯ ಹೊಂದಾಣಿಕೆ | |
-|  | _(no English equivalent)_ | ನಿಮ್ಮ ಮಣ್ಣು ಮತ್ತು ಹವಾಮಾನ ಈ ಬೆಳೆಗೆ ಚೆನ್ನಾಗಿ ಹೊಂದುತ್ತವೆ. | |
+|  | Your soil and weather suit this crop well. | ನಿಮ್ಮ ಮಣ್ಣು ಮತ್ತು ಹವಾಮಾನ ಈ ಬೆಳೆಗೆ ಚೆನ್ನಾಗಿ ಹೊಂದುತ್ತವೆ. | |
 |  | Good match | ಒಳ್ಳೆಯ ಹೊಂದಾಣಿಕೆ | |
-|  | _(no English equivalent)_ | ಈ ಬೆಳೆ ಚೆನ್ನಾಗಿ ಬರಬೇಕು. ಬೇರೆ ಆಯ್ಕೆಗಳನ್ನೂ ನೋಡಿ. | |
+|  | This crop should do well. Look at the other options too. | ಈ ಬೆಳೆ ಚೆನ್ನಾಗಿ ಬರಬೇಕು. ಬೇರೆ ಆಯ್ಕೆಗಳನ್ನೂ ನೋಡಿ. | |
 |  | Fair match | ಸಾಧಾರಣ ಹೊಂದಾಣಿಕೆ | |
-|  | _(no English equivalent)_ | ಈ ಬೆಳೆ ಆಗಬಹುದು, ಆದರೆ ಮುಂದಿನವೂ ಹತ್ತಿರವಿವೆ. ನಿರ್ಧರಿಸುವ ಮೊದಲು ಹೋಲಿಸಿ ನೋಡಿ. | |
+|  | This crop may work, but the next ones are close. Compare them before you decide. | ಈ ಬೆಳೆ ಆಗಬಹುದು, ಆದರೆ ಮುಂದಿನವೂ ಹತ್ತಿರವಿವೆ. ನಿರ್ಧರಿಸುವ ಮೊದಲು ಹೋಲಿಸಿ ನೋಡಿ. | |
 |  | Weak match | ದುರ್ಬಲ ಹೊಂದಾಣಿಕೆ | |
-|  | _(no English equivalent)_ | ಯಾವ ಬೆಳೆಯೂ ನಿಮ್ಮ ಅಳತೆಗಳಿಗೆ ಸ್ಪಷ್ಟವಾಗಿ ಹೊಂದುವುದಿಲ್ಲ. ಬಿತ್ತನೆಗೆ ಮೊದಲು ಸರ್ಕಾರಿ ಪ್ರಯೋಗಾಲಯದಲ್ಲಿ ಮಣ್ಣು ಪರೀಕ್ಷೆ ಮಾಡಿಸಿ. | |
+|  | No crop fits your readings clearly. Please get your soil tested at a government lab before sowing. | ಯಾವ ಬೆಳೆಯೂ ನಿಮ್ಮ ಅಳತೆಗಳಿಗೆ ಸ್ಪಷ್ಟವಾಗಿ ಹೊಂದುವುದಿಲ್ಲ. ಬಿತ್ತನೆಗೆ ಮೊದಲು ಸರ್ಕಾರಿ ಪ್ರಯೋಗಾಲಯದಲ್ಲಿ ಮಣ್ಣು ಪರೀಕ್ಷೆ ಮಾಡಿಸಿ. | |
 
 ## Field instructions
 
@@ -145,13 +162,44 @@ This is agronomic advice people act on in a field, so a wrong word has a real co
 |  | past one | ಸುಮಾರು {days} ದಿನದ ಹಿಂದೆ | |
 |  | today | ಇಂದು | |
 
+## Months
+
+| | English | Kannada | Correction |
+|---|---|---|---|
+|  | Jan | ಜನ | |
+|  | Feb | ಫೆಬ್ರ | |
+|  | Mar | ಮಾರ್ಚ್ | |
+|  | Apr | ಏಪ್ರಿ | |
+|  | May | ಮೇ | |
+|  | Jun | ಜೂನ್ | |
+|  | Jul | ಜುಲೈ | |
+|  | Aug | ಆಗ | |
+|  | Sep | ಸೆಪ್ಟೆಂ | |
+|  | Oct | ಅಕ್ಟೋ | |
+|  | Nov | ನವೆಂ | |
+|  | Dec | ಡಿಸೆಂ | |
+
+## Table headers
+
+| | English | Kannada | Correction |
+|---|---|---|---|
+|  | Saved on | ಉಳಿಸಿದ ದಿನ | |
+|  | Place | ಸ್ಥಳ | |
+|  | Crop | ಬೆಳೆ | |
+|  | Match | ಹೊಂದಾಣಿಕೆ | |
+|  | Nitrogen | ಸಾರಜನಕ | |
+|  | Phosphorus | ರಂಜಕ | |
+|  | Potassium | ಪೊಟ್ಯಾಶ್ | |
+|  | Soil pH | ಮಣ್ಣಿನ pH | |
+|  | Rain (mm) | ಮಳೆ (ಮಿಮೀ) | |
+
 ## Sentences
 
 | | English | Kannada | Correction |
 |---|---|---|---|
-|  | _(no English equivalent)_ | {district} ಜಿಲ್ಲೆಯ {count} ಮಣ್ಣು ಪರೀಕ್ಷೆಗಳ ಸರಾಸರಿ ಅಳತೆ ಇದು. | |
-|  | _(no English equivalent)_ | {district} ಜಿಲ್ಲೆಯ ಸಾಮಾನ್ಯ ಮಣ್ಣು — ಇದು ಸಮೀಕ್ಷೆಯಿಂದ ಬಂದದ್ದಲ್ಲ. ನಿಮ್ಮ ಬಳಿ ಮಣ್ಣು ಆರೋಗ್ಯ ಕಾರ್ಡ್ ಇದ್ದರೆ ಕೆಳಗೆ ಸರಿಪಡಿಸಿ. | |
-|  | _(no English equivalent)_ | {district} ಜಿಲ್ಲೆಯ ಸಾಮಾನ್ಯ ಹವಾಮಾನ | |
+|  | Typical of {sample_count} soil tests from {district}. | {district} ಜಿಲ್ಲೆಯ {count} ಮಣ್ಣು ಪರೀಕ್ಷೆಗಳ ಸರಾಸರಿ ಅಳತೆ ಇದು. | |
+|  | Typical soil for {district} — not from a survey, so correct it below if you have a soil card. | {district} ಜಿಲ್ಲೆಯ ಸಾಮಾನ್ಯ ಮಣ್ಣು — ಇದು ಸಮೀಕ್ಷೆಯಿಂದ ಬಂದದ್ದಲ್ಲ. ನಿಮ್ಮ ಬಳಿ ಮಣ್ಣು ಆರೋಗ್ಯ ಕಾರ್ಡ್ ಇದ್ದರೆ ಕೆಳಗೆ ಸರಿಪಡಿಸಿ. | |
+|  | normals for {where} | {district} ಜಿಲ್ಲೆಯ ಸಾಮಾನ್ಯ ಹವಾಮಾನ | |
 
 ## Warning
 

@@ -169,6 +169,44 @@ KANNADA_EXTRA: Dict[str, str] = {
         "ಏನಾದರೂ ಬದಲಾಯಿತೇ? ಮೇಲೆ ನಿಮ್ಮ ಅಳತೆ ಸರಿಪಡಿಸಿ, ನಂತರ ಮತ್ತೆ ಒತ್ತಿ."
     ),
     "whats_due": "ಮುಂದೆ ಏನು ಮಾಡಬೇಕು",
+    "advice_saved_count": "ಉಳಿಸಿದ ಸಲಹೆಗಳು",
+    "average_match": "ಸರಾಸರಿ ಹೊಂದಾಣಿಕೆ",
+    "different_crops": "ಬೇರೆ ಬೇರೆ ಬೆಳೆಗಳು",
+    "open_saved": "ಉಳಿಸಿದ ಒಂದನ್ನು ತೆರೆಯಿರಿ",
+    "load_readings": "↩️ ಈ ಅಳತೆಗಳನ್ನು ತನ್ನಿ",
+    "download_all": "⬇️ ಎಲ್ಲವನ್ನೂ ಇಳಿಸಿಕೊಳ್ಳಿ (CSV)",
+    "which_crops": "ಯಾವ ಬೆಳೆ ಹೆಚ್ಚು ಬಂತು",
+    "no_store": (
+        "ಈಗ ಈ ಸರ್ವರ್‌ನಲ್ಲಿ ಉಳಿಸಲು ಆಗುತ್ತಿಲ್ಲ. ನಿಮ್ಮ ಸಲಹೆ ಪರದೆಯ ಮೇಲೆ "
+        "ಇದೆ — ಫೋಟೊ ತೆಗೆದಿಟ್ಟುಕೊಳ್ಳಿ, ಅಥವಾ ಕೆಳಗಿನ ಹಂಚಿಕೆ ಬಳಸಿ."
+    ),
+    "save_failed": (
+        "ಉಳಿಸಲು ಆಗಲಿಲ್ಲ. ನಿಮ್ಮ ಸಲಹೆ ಪರದೆಯ ಮೇಲೆ ಇದೆ — ಫೋಟೊ "
+        "ತೆಗೆದಿಟ್ಟುಕೊಳ್ಳಿ, ಅಥವಾ ಕೆಳಗಿನ ಹಂಚಿಕೆ ಬಳಸಿ."
+    ),
+    "advice_saved": "ಉಳಿಸಲಾಗಿದೆ. \"ಉಳಿಸಿದವು ಮತ್ತು ಕಾರ್ಡ್\" ನಲ್ಲಿ ನೋಡಬಹುದು.",
+    "checking_answer": "ಉತ್ತರ ಪರಿಶೀಲಿಸಲಾಗುತ್ತಿದೆ…",
+    "records_blurb": (
+        "ನೀವು ಉಳಿಸಿದ ಪ್ರತಿ ಸಲಹೆಯೂ ಇಲ್ಲಿ ಇರುತ್ತದೆ, ಅದಕ್ಕೆ ಆಧಾರವಾದ "
+        "ಅಳತೆಗಳ ಜೊತೆಗೆ."
+    ),
+    "change_dates": "ದಿನಾಂಕ ಬದಲಿಸಿ",
+    "no_records": (
+        "ಈ ದಿನಾಂಕಗಳಲ್ಲಿ ಏನೂ ಉಳಿಸಿಲ್ಲ. ಮೇಲಿನ ಹಸಿರು ಗುಂಡಿ ಒತ್ತಿ ಸಲಹೆ "
+        "ಪಡೆಯಿರಿ, ನಂತರ ಅದನ್ನು ಉಳಿಸಿ — ಅದು ಇಲ್ಲಿ ಕಾಣಿಸುತ್ತದೆ."
+    ),
+    "card_print": (
+        "ಇದನ್ನು ಮುದ್ರಿಸಿ ಇಟ್ಟುಕೊಳ್ಳಿ, ಅಥವಾ ನಿಮ್ಮ ಕೃಷಿ ಅಧಿಕಾರಿಗೆ ತೋರಿಸಿ."
+    ),
+    "card_bilingual_note": (
+        "ಪ್ರತಿ ಕನ್ನಡ ಪದದ ಪಕ್ಕದಲ್ಲಿ ಇಂಗ್ಲಿಷ್ ಕೂಡ ಇರುತ್ತದೆ, ಹಾಗಾಗಿ ಅನುವಾದ "
+        "ತಪ್ಪಾದರೂ ಸಲಹೆ ಬದಲಾಗುವುದಿಲ್ಲ. ಈ ಅನುವಾದಗಳನ್ನು ಕನ್ನಡ ಬಲ್ಲವರು ಇನ್ನೂ "
+        "ಪರಿಶೀಲಿಸಿಲ್ಲ."
+    ),
+    "card_pdf_english_only": (
+        "PDF ಇಂಗ್ಲಿಷ್‌ನಲ್ಲಿ ಮಾತ್ರ ಇರುತ್ತದೆ — ಅದರ ಅಕ್ಷರಗಳಲ್ಲಿ ಕನ್ನಡ ಮೂಡುವುದಿಲ್ಲ. "
+        "ಎರಡೂ ಭಾಷೆಯ ಪ್ರತಿಗಾಗಿ HTML ಇಳಿಸಿಕೊಳ್ಳಿ."
+    ),
     "share_heading": "ಈ ಸಲಹೆಯನ್ನು ಹಂಚಿಕೊಳ್ಳಿ",
     "share_whatsapp": "📤 ವಾಟ್ಸಾಪ್‌ನಲ್ಲಿ ಕಳುಹಿಸಿ",
     "share_copy": "ಅಥವಾ ಪಠ್ಯವನ್ನು ನಕಲಿಸಿ",
@@ -352,6 +390,56 @@ def phrase(key: str, english: str, language: str = ENGLISH, **parts: object) -> 
     return template.format(**parts) if template else english
 
 
+#: The saved-records table. Column names rather than sentences, so they are
+#: kept apart from the prose catalogue -- a header has to fit a narrow phone
+#: column, which is a different constraint from reading well.
+KANNADA_LEDGER_COLUMNS: Dict[str, str] = {
+    "Saved on": "ಉಳಿಸಿದ ದಿನ",
+    "Place": "ಸ್ಥಳ",
+    "Crop": "ಬೆಳೆ",
+    "Match": "ಹೊಂದಾಣಿಕೆ",
+    "Nitrogen": "ಸಾರಜನಕ",
+    "Phosphorus": "ರಂಜಕ",
+    "Potassium": "ಪೊಟ್ಯಾಶ್",
+    "Soil pH": "ಮಣ್ಣಿನ pH",
+    "Rain (mm)": "ಮಳೆ (ಮಿಮೀ)",
+}
+
+
+#: Month abbreviations for a saved record's date. Short forms, because they
+#: sit inside a narrow table column beside the day and the year.
+KANNADA_MONTHS: Dict[str, str] = {
+    "Jan": "ಜನ", "Feb": "ಫೆಬ್ರ", "Mar": "ಮಾರ್ಚ್", "Apr": "ಏಪ್ರಿ",
+    "May": "ಮೇ", "Jun": "ಜೂನ್", "Jul": "ಜುಲೈ", "Aug": "ಆಗ",
+    "Sep": "ಸೆಪ್ಟೆಂ", "Oct": "ಅಕ್ಟೋ", "Nov": "ನವೆಂ", "Dec": "ಡಿಸೆಂ",
+}
+
+
+def short_date(value: object, language: str = ENGLISH) -> Optional[str]:
+    """``14 Sep 2026`` / ``14 ಸೆಪ್ಟೆಂ 2026``, or ``None`` if unparseable.
+
+    The digits stay Western: they are read off a phone keypad and printed on
+    a soil card beside figures that are Western everywhere else in the app.
+    Only the month name changes.
+    """
+    from datetime import date, datetime
+
+    if isinstance(value, datetime):
+        moment = value.date()
+    elif isinstance(value, date):
+        moment = value
+    else:
+        try:
+            moment = datetime.fromisoformat(str(value)[:19]).date()
+        except (TypeError, ValueError):
+            return None
+    english = f"{moment:%d %b %Y}"
+    if normalise(language) != KANNADA:
+        return english
+    return english.replace(f"{moment:%b}",
+                           KANNADA_MONTHS.get(f"{moment:%b}", f"{moment:%b}"))
+
+
 def stage_words(
     name: str, action: str, language: str = ENGLISH, *, day: int = 0
 ) -> Tuple[str, str]:
@@ -451,4 +539,5 @@ __all__ = [
     "KANNADA_STAGES", "KANNADA_STAGE_ACTIONS", "KANNADA_WHEN",
     "stage_words", "when_words",
     "KANNADA_PHRASES", "phrase",
+    "KANNADA_LEDGER_COLUMNS", "KANNADA_MONTHS", "short_date",
 ]

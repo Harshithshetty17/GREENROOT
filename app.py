@@ -382,7 +382,7 @@ st.markdown(_CSS, unsafe_allow_html=True)
 # --------------------------------------------------------------------------- #
 # Cached resources
 # --------------------------------------------------------------------------- #
-@st.cache_resource(show_spinner="Loading stacking ensemble…")
+@st.cache_resource(show_spinner="Loading the model…")
 def load_recommender() -> Optional[CropRecommender]:
     """Load the deployed ensemble once per server process."""
     try:
@@ -392,7 +392,7 @@ def load_recommender() -> Optional[CropRecommender]:
         return None
 
 
-@st.cache_resource(show_spinner="Fitting explainability surrogate…")
+@st.cache_resource(show_spinner="Getting the checks ready…")
 def load_explainer() -> Optional[ExplainerConsensus]:
     """Build the TreeSHAP/LIME consensus engine once per server process."""
     try:
@@ -492,6 +492,13 @@ def _acres_words(acres: float, simple: bool = True) -> str:
     if simple and current_language() == i18n.KANNADA:
         return i18n.KANNADA_EXTRA["acre"]
     return "acre" if acres == 1 else "acres"
+
+
+def _crop_label(crop: str, simple: bool = True) -> str:
+    """A crop's name in the reader's language."""
+    if simple and current_language() == i18n.KANNADA:
+        return agronomy.kannada_name(crop)
+    return crop.title()
 
 
 def band_for(confidence: float):
@@ -1735,7 +1742,13 @@ def _render_worth_it(
 def _persist(state: Dict[str, object]) -> None:
     """Write the current recommendation to the audit ledger."""
     if not ensure_database():
-        st.error("Audit database is unavailable in this environment.")
+        st.error(
+            t_extra("no_store", "Saving is not working on this server right "
+                                "now. Your advice is still on screen — take a "
+                                "photo of it, or use Share below.")
+            if is_simple()
+            else "Audit database is unavailable in this environment."
+        )
         return
 
     prediction = state["prediction"]
@@ -1759,9 +1772,20 @@ def _persist(state: Dict[str, object]) -> None:
             user_id=signed_in.id if signed_in else None,
         )
     except Exception as exc:  # noqa: BLE001 - surface, never crash the dashboard.
-        st.error(f"Could not persist the recommendation: {exc}")
+        logging.warning("Could not persist the recommendation: %s", exc)
+        st.error(
+            t_extra("save_failed", "Could not save it. Your advice is still "
+                                   "on screen — take a photo of it, or use "
+                                   "Share below.")
+            if is_simple()
+            else f"Could not persist the recommendation: {exc}"
+        )
         return
-    st.success(f"Committed to the audit ledger as record #{record_id}.")
+    st.success(
+        t_extra("advice_saved", "Saved. You can find it under Saved & Card.")
+        if is_simple()
+        else f"Committed to the audit ledger as record #{record_id}."
+    )
 
     # Inside the Android shell, put a copy on the phone itself: the ledger
     # above lives on the server, and the farmer standing in the field is the
@@ -2303,8 +2327,9 @@ def render_audit_tab() -> None:
     simple = is_simple()
     st.markdown(f"#### {tr('records_heading', simple)}")
     st.caption(
-        "Every piece of advice you saved is kept here, with the readings it "
-        "was based on."
+        t_extra("records_blurb",
+                "Every piece of advice you saved is kept here, with the "
+                "readings it was based on.")
         if simple
         else "Every committed recommendation is recorded with its inputs, its "
         "confidence, its dominant SHAP driver, and its explainer agreement "
@@ -2312,7 +2337,13 @@ def render_audit_tab() -> None:
     )
 
     if not ensure_database():
-        st.error("Audit database is unavailable in this environment.")
+        st.error(
+            t_extra("no_store", "Saving is not working on this server right "
+                                "now. Your advice is still on screen — take a "
+                                "photo of it, or use Share below.")
+            if is_simple()
+            else "Audit database is unavailable in this environment."
+        )
         return
 
     # Folded away by default: stacked on a phone these three controls fill
@@ -2320,7 +2351,9 @@ def render_audit_tab() -> None:
     # window -- the last 30 days -- is the one most people want.
     today = date.today()
     with st.expander(
-        "Change the dates" if simple else "Filter the ledger", expanded=False
+        t_extra("change_dates", "Change the dates") if simple
+        else "Filter the ledger",
+        expanded=False,
     ):
         controls = st.columns(3)
         start = controls[0].date_input("From", value=today - timedelta(days=30))
@@ -2348,7 +2381,12 @@ def render_audit_tab() -> None:
 
     if frame.empty:
         st.info(
-            "No records in this window. Commit a recommendation from the "
+            t_extra("no_records",
+                    "Nothing saved in these dates. Press the green button at "
+                    "the top to get advice, then save it — it will show up "
+                    "here.")
+            if simple
+            else "No records in this window. Commit a recommendation from the "
             "**Precision Recommendation** tab to populate the ledger."
         )
         return
@@ -2357,17 +2395,19 @@ def render_audit_tab() -> None:
     if simple:
         summary = st.columns(3)
         summary[0].metric(
-            "Advice saved",
+            t_extra("advice_saved_count", "Advice saved"),
             f"{len(frame):,}",
             # Only worth saying when the date window is hiding something,
             # and as a caption: metric deltas always draw a direction arrow.
             help=f"of {total:,} saved in all" if total != len(frame) else None,
         )
         summary[1].metric(
-            "Average match", f"{frame['confidence'].mean():.0f} / 100"
+            t_extra("average_match", "Average match"),
+            f"{frame['confidence'].mean():.0f} / 100",
         )
         summary[2].metric(
-            "Different crops", f"{frame['recommended_crop'].nunique()}"
+            t_extra("different_crops", "Different crops"),
+            f"{frame['recommended_crop'].nunique()}",
         )
     else:
         summary = st.columns(4)
@@ -2384,7 +2424,8 @@ def render_audit_tab() -> None:
         )
 
     st.dataframe(
-        db.farmer_view(frame) if simple else db.examiner_view(frame),
+        db.farmer_view(frame, current_language()) if simple
+        else db.examiner_view(frame),
         hide_index=True,
         width="stretch",
         height=db.table_height(len(frame)),
@@ -2396,19 +2437,21 @@ def render_audit_tab() -> None:
     options = {
         (
             f"#{int(row['id'])} · {row['district']} · "
-            f"{str(row['recommended_crop']).title()} · "
-            f"{db.record_date(row['timestamp'], simple)}"
+            f"{_crop_label(str(row['recommended_crop']), simple)} · "
+            f"{db.record_date(row['timestamp'], simple, current_language())}"
         ): row
         for _, row in frame.iterrows()
     }
     chosen = reload_columns[0].selectbox(
-        "Open a saved reading" if simple else "Reload a record into the form",
+        t_extra("open_saved", "Open a saved reading") if simple
+        else "Reload a record into the form",
         options=list(options),
         index=0,
         key="reload_pick",
     )
     if reload_columns[1].button(
-        "↩️ Load these readings", width="stretch", key="reload_go"
+        t_extra("load_readings", "↩️ Load these readings"),
+        width="stretch", key="reload_go",
     ):
         row = options[chosen]
         for feature, column in (
@@ -2428,7 +2471,7 @@ def render_audit_tab() -> None:
     buffer = io.StringIO()
     frame.to_csv(buffer, index=False)
     st.download_button(
-        "⬇️ Download all of this (CSV)" if simple
+        t_extra("download_all", "⬇️ Download all of this (CSV)") if simple
         else "⬇️ Download audit trail (CSV)",
         data=buffer.getvalue(),
         file_name=f"greenroot_audit_{datetime.now():%Y%m%d_%H%M}.csv",
@@ -2437,7 +2480,7 @@ def render_audit_tab() -> None:
     )
 
     with st.expander(
-        "Which crops came up most" if simple
+        t_extra("which_crops", "Which crops came up most") if simple
         else "Distribution by recommended crop"
     ):
         counts = frame["recommended_crop"].value_counts()
@@ -2461,9 +2504,11 @@ def render_card_tab(state: Dict[str, object]) -> None:
         return
 
     simple = is_simple()
+    reads_kannada = simple and current_language() == i18n.KANNADA
     st.markdown(f"#### {tr('card_heading', simple)}")
     st.caption(
-        "Print this and keep it, or show it to your agriculture officer."
+        t_extra("card_print", "Print this and keep it, or show it to your "
+                              "agriculture officer.")
         if simple
         else "The card an extension officer hands to the cultivator. Every "
         "export renders from one payload, so the figures cannot diverge "
@@ -2473,14 +2518,20 @@ def render_card_tab(state: Dict[str, object]) -> None:
     controls = st.columns([1.4, 2])
     bilingual = controls[0].toggle(
         "ಕನ್ನಡ · Bilingual card",
-        value=False,
+        # Somebody who has already told us they read Kannada should not have
+        # to find a toggle to get a card they can read.
+        value=reads_kannada,
         help="Show Kannada alongside English on the farmer-facing card.",
     )
     if bilingual:
         controls[1].caption(
-            "English is retained beside every Kannada term, so a translation "
-            "error cannot silently change the advice. Translations are a "
-            "prototype mapping and need native-speaker review before field use."
+            t_extra(
+                "card_bilingual_note",
+                "English is retained beside every Kannada term, so a "
+                "translation error cannot silently change the advice. "
+                "Translations are a prototype mapping and need native-speaker "
+                "review before field use.",
+            )
         )
 
     card = dataclasses.replace(
@@ -2496,12 +2547,25 @@ def render_card_tab(state: Dict[str, object]) -> None:
     st.iframe(_as_data_uri(render_html(card)), height=900)
 
     stamp = f"{datetime.now():%Y%m%d_%H%M}"
-    downloads = st.columns(4)
 
     try:
         pdf_bytes = render_pdf(card)
     except PDFUnavailableError:
         pdf_bytes = None
+
+    # Said before the choice, not after it. The PDF is the obvious button to
+    # press and it is the one export that cannot carry Kannada, so somebody
+    # reading a bilingual card needs to know that while they are choosing.
+    if bilingual and pdf_bytes is not None:
+        st.caption(
+            t_extra(
+                "card_pdf_english_only",
+                "The PDF is English-only: its built-in fonts cannot render "
+                "Kannada. Download the HTML for a printout in both languages.",
+            )
+        )
+
+    downloads = st.columns(4)
 
     if pdf_bytes is not None:
         downloads[0].download_button(
@@ -2509,7 +2573,8 @@ def render_card_tab(state: Dict[str, object]) -> None:
             data=pdf_bytes,
             file_name=f"soil_health_card_{stamp}.pdf",
             mime="application/pdf",
-            type="primary",
+            # Whichever export the reader can actually read leads.
+            type="secondary" if bilingual else "primary",
             width="stretch",
         )
     else:
@@ -2523,6 +2588,7 @@ def render_card_tab(state: Dict[str, object]) -> None:
         data=render_html(card),
         file_name=f"soil_health_card_{stamp}.html",
         mime="text/html",
+        type="primary" if bilingual else "secondary",
         width="stretch",
     )
     downloads[2].download_button(
@@ -2539,13 +2605,6 @@ def render_card_tab(state: Dict[str, object]) -> None:
         mime="text/plain",
         width="stretch",
     )
-
-    if bilingual and pdf_bytes is not None:
-        st.caption(
-            "The PDF is English-only: its core fonts are Latin-1 and this "
-            "project does not bundle a Kannada typeface. Use the HTML export "
-            "for a bilingual printout."
-        )
 
     with st.expander("Plain-text preview (SMS / thermal printer)"):
         st.code(render_text(card), language=None)
@@ -2653,7 +2712,12 @@ def main() -> None:
         consensus = None
         explainer = load_explainer()
         if explainer is not None:
-            with st.spinner("Auditing the decision with TreeSHAP and LIME…"):
+            spinner = (
+                t_extra("checking_answer", "Checking the answer…")
+                if is_simple()
+                else "Auditing the decision with TreeSHAP and LIME…"
+            )
+            with st.spinner(spinner):
                 try:
                     consensus = explainer.explain(vector, prediction.crop)
                 except Exception as exc:  # noqa: BLE001 - XAI must never block.

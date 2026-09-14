@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -473,16 +474,32 @@ class TestRecovery:
         codes = "".join(auth.generate_recovery_code() for _ in range(200))
         assert not (set("OIL01U") & set(codes))
 
-    def test_a_v2_account_without_a_code_says_so_clearly(self, db, account):
+    def test_a_v2_account_without_a_code_is_still_reportable_internally(
+            self, db, account):
+        """``has_recovery_code`` is how the app knows to offer one. It takes
+        a user id, so only a signed-in user can ask it about themselves."""
         user, _ = account
         conn = sqlite3.connect(db)
         conn.execute(f"UPDATE {dbm.USERS_TABLE} SET recovery_hash=NULL "
                      f"WHERE id=?;", (user.id,))
         conn.commit(); conn.close()
         assert auth.has_recovery_code(user.id, db_path=db) is False
-        with pytest.raises(auth.AuthError, match="no recovery code"):
+
+    def test_but_the_reset_form_does_not_say_so_out_loud(self, db, account):
+        """This test used to assert the opposite -- that the refusal named
+        the reason. It did, and in doing so it told anyone who asked that the
+        number was registered, before any failure counter had been touched.
+        The explanation now sits on the form, where everyone sees it."""
+        user, _ = account
+        conn = sqlite3.connect(db)
+        conn.execute(f"UPDATE {dbm.USERS_TABLE} SET recovery_hash=NULL "
+                     f"WHERE id=?;", (user.id,))
+        conn.commit(); conn.close()
+        with pytest.raises(auth.AuthError) as raised:
             auth.reset_pin_with_code("9876543210", "AAAA-BBBB", "8351",
                                      db_path=db)
+        assert "recovery code" not in str(raised.value).replace(
+            "Wrong number or recovery code.", "")
 
 
 # --------------------------------------------------------------------------- #
@@ -577,3 +594,83 @@ class TestPlots:
         p = auth.save_plot(alice_id, "North", "Udupi", 1.0, FEATURES,
                            db_path=db)
         assert p.label == "North · Udupi · 1 acre"
+
+
+class TestAccountEnumeration:
+    """Returning the same words for "no such number" and "wrong PIN" hides
+    nothing if the two answers arrive at different speeds, or if some other
+    branch answers the question outright."""
+
+    def test_an_unknown_number_costs_what_a_known_one_costs(self, db):
+        """bcrypt at cost 12 takes ~0.3s. Skipping it for an unknown number
+        made the two paths differ by a factor of three thousand, which is
+        readable over any network."""
+        accounts.register("9876543210", "5837", db_path=db)
+
+        def elapsed(phone: str) -> float:
+            start = time.perf_counter()
+            with pytest.raises(accounts.AuthError):
+                accounts.sign_in(phone, "1357", db_path=db)
+            return time.perf_counter() - start
+
+        known = min(elapsed("9876543210") for _ in range(3))
+        unknown = min(elapsed("9000000001") for _ in range(3))
+        # Generous: the point is orders of magnitude, not milliseconds.
+        assert 0.25 < unknown / known < 4.0, (
+            f"unknown number took {unknown:.4f}s, known took {known:.4f}s"
+        )
+
+    def test_the_refusal_reads_the_same_either_way(self, db):
+        accounts.register("9876543210", "5837", db_path=db)
+        said = []
+        for phone in ("9876543210", "9000000001"):
+            with pytest.raises(accounts.AuthError) as raised:
+                accounts.sign_in(phone, "1357", db_path=db)
+            said.append(str(raised.value))
+        assert said[0] == said[1]
+
+    def test_recovery_says_the_same_for_a_legacy_account(self, db):
+        """An account with no recovery code must refuse exactly as an unknown
+        number does. A distinct message there confirmed the number existed,
+        before any failure counter had been touched -- so it could be asked
+        as often as you liked."""
+        user, _ = accounts.register("9876543210", "5837", db_path=db)
+        with dbm.get_connection(db, write=True) as conn:
+            conn.execute(
+                f"UPDATE {dbm.USERS_TABLE} SET recovery_hash = NULL "
+                f"WHERE id = ?;", (user.id,))
+
+        said = []
+        for phone in ("9876543210", "9000000001"):
+            with pytest.raises(accounts.AuthError) as raised:
+                accounts.reset_pin_with_code(phone, "ABCD-EFGH", "5837",
+                                             db_path=db)
+            said.append(str(raised.value))
+        assert said[0] == said[1]
+
+    def test_recovery_on_an_unknown_number_also_pays_the_cost(self, db):
+        start = time.perf_counter()
+        with pytest.raises(accounts.AuthError):
+            accounts.reset_pin_with_code("9000000001", "ABCD-EFGH", "5837",
+                                         db_path=db)
+        assert time.perf_counter() - start > 0.05
+
+
+class TestCodeNormalisationIsBackwardCompatible:
+    """The O->0 and I/L->1 mapping was dropped as a no-op. These pin that it
+    really was one, so a hash written under the old code still verifies."""
+
+    def test_a_generated_code_is_untouched_apart_from_its_dash(self):
+        for _ in range(200):
+            code = auth.generate_recovery_code()
+            assert accounts._normalise_code(code) == code.replace("-", "")
+
+    def test_case_and_punctuation_are_still_forgiven(self):
+        assert (accounts._normalise_code(" abcd-efgh ")
+                == accounts._normalise_code("ABCDEFGH"))
+
+    def test_a_code_issued_before_the_change_still_works(self, db):
+        user, code = auth.register("9876543210", "4729", db_path=db)
+        restored, _ = auth.reset_pin_with_code("9876543210", code.lower(),
+                                               "8351", db_path=db)
+        assert restored.id == user.id

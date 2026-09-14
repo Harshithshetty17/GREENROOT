@@ -761,6 +761,14 @@ def render_account_sidebar(simple: bool) -> None:
                 "Using a code cancels it. You will get a new one to write "
                 "down."
             )
+            # Said to everybody rather than only to the accounts it applies
+            # to: a message that appears for one number and not another
+            # answers "is this number registered?" to anyone who asks.
+            st.caption(
+                "Accounts made before recovery codes existed do not have "
+                "one. If you had an account back then, sign in with your PIN "
+                "and create a code from your account panel."
+            )
         return
 
     # ---- signed in ------------------------------------------------------

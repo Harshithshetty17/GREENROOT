@@ -184,6 +184,9 @@ FIGURE_DPI: Final[int] = 300
 
 #: Headline cross-validated accuracy of the persisted stacking ensemble,
 #: reported by ``train.py`` under stratified 5-fold CV.
+#: Shown in About. Bump on a release the user would notice.
+APP_VERSION: Final[str] = "1.1.0"
+
 REPORTED_CV_ACCURACY: Final[float] = 0.9941
 
 

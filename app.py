@@ -56,6 +56,9 @@ from src.models.xai_engine import ExplainerConsensus
 from src.services.soil_service import get_district_baseline, list_districts
 from src.services.weather_service import get_weather
 from src.utils.agronomy_advisory import CRITICAL, INFO, WARNING, generate_advisory
+from src.utils.economics import estimate_cost, price_per_kg_from_bag
+from src.utils.intervention import simulate_advisory
+from src.utils import seasons as season_lib
 from src.utils.plain_language import (
     category_name,
     confidence_band,
@@ -439,6 +442,24 @@ def render_sidebar() -> Dict[str, object]:
         key="in_ph",
     )
 
+    st.sidebar.markdown(f"### {tr('sidebar_season', simple)}")
+    season_keys = list(season_lib.SEASONS)
+    st.sidebar.selectbox(
+        "When will you sow?" if simple else "Cropping season",
+        options=season_keys,
+        index=season_keys.index(season_lib.default_season(date.today().month)),
+        format_func=lambda key: season_lib.SEASONS[key][0],
+        key="season",
+        help=(
+            "A crop can suit your soil and still be wrong for the time of "
+            "year. We check both."
+            if simple
+            else "Sowing window; used to flag calendar mismatches that the "
+            "edaphic model cannot see."
+        ),
+    )
+    st.sidebar.caption(season_lib.SEASONS[st.session_state["season"]][1])
+
     st.sidebar.markdown(f"### {tr('sidebar_weather', simple)}")
     for name in ("temperature", "humidity", "rainfall"):
         low, high = FEATURE_BOUNDS[name]
@@ -458,7 +479,12 @@ def render_sidebar() -> Dict[str, object]:
         else "Close the sidebar and run the recommendation from the action bar."
     )
 
-    return {"district": district, "city": city, "features": values}
+    return {
+        "district": district,
+        "city": city,
+        "features": values,
+        "season": st.session_state.get("season", season_lib.KHARIF),
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -502,6 +528,17 @@ def render_recommendation_tab(state: Dict[str, object]) -> None:
         if simple:
             st.caption(band.detail)
 
+        season = str(state.get("season") or season_lib.KHARIF)
+        fit = season_lib.assess(prediction.crop, season)
+        if not fit.suitable:
+            st.error(f"📅 **{tr('season_clash', simple)}** — {fit.message(simple)}")
+        elif fit.is_perennial:
+            # Not silence: "the season does not apply here" is itself the
+            # answer, and leaving it out looks like the check never ran.
+            st.info(f"📅 {fit.message(simple)}")
+        else:
+            st.success(f"📅 {fit.message(simple)}")
+
         if prediction.is_low_confidence:
             st.warning(tr("low_confidence", simple))
         if prediction.is_out_of_distribution:
@@ -527,6 +564,11 @@ def render_recommendation_tab(state: Dict[str, object]) -> None:
                 label = (
                     f"**{candidate.rank}. {candidate.crop.capitalize()}** — "
                     f"{candidate.confidence_pct:.2f}%"
+                )
+            candidate_fit = season_lib.assess(candidate.crop, season)
+            if not candidate_fit.suitable:
+                label += (
+                    f"  ·  ⚠️ *{candidate_fit.sowable_labels().lower()} crop*"
                 )
             st.markdown(label)
             st.progress(min(max(candidate.probability, 0.0), 1.0))
@@ -567,6 +609,7 @@ def render_recommendation_tab(state: Dict[str, object]) -> None:
                     }
                 )
             st.dataframe(table, hide_index=True, width="stretch")
+            _render_worth_it(state, advisory, simple)
 
     st.markdown("---")
     st.markdown(f"#### {tr('compare_heading', simple)}")
@@ -598,6 +641,144 @@ def render_recommendation_tab(state: Dict[str, object]) -> None:
     figure.tight_layout()
     st.pyplot(figure, width="stretch")
     plt.close(figure)
+
+
+def _render_worth_it(
+    state: Dict[str, object], advisory, simple: bool
+) -> None:
+    """Show what the prescription buys, and what it costs to follow.
+
+    Two questions a fertiliser table alone cannot answer: does adding this
+    actually improve the match, and how much extra yield must it earn back?
+    """
+    recommender = state.get("recommender")
+    prediction = state.get("prediction")
+    if recommender is None or prediction is None or not advisory.fertiliser_plan:
+        return
+
+    with st.expander(tr("worth_heading", simple), expanded=False):
+        st.caption(tr("worth_intro", simple))
+
+        simulation = simulate_advisory(
+            recommender, prediction.raw_features, advisory, before=prediction
+        )
+        if simulation is None:
+            st.info("Nothing to add, so nothing to weigh up.")
+            return
+
+        columns = st.columns(3)
+        columns[0].metric(
+            "Match now" if simple else "Confidence before",
+            f"{simulation.before.confidence:.0f}/100"
+            if simple
+            else f"{simulation.before.confidence:.2f}%",
+        )
+        columns[1].metric(
+            "Match after adding" if simple else "Confidence after",
+            f"{simulation.after.confidence:.0f}/100"
+            if simple
+            else f"{simulation.after.confidence:.2f}%",
+            delta=f"{simulation.original_crop_delta:+.0f}"
+            if simple
+            else f"{simulation.original_crop_delta:+.2f} pp",
+        )
+        columns[2].metric(
+            "Best crop after" if simple else "Argmax after",
+            simulation.after.crop.capitalize(),
+        )
+
+        st.markdown(f"**{simulation.verdict(simple)}**")
+
+        rows = simulation.comparison_rows()
+        if rows:
+            st.dataframe(
+                pd.DataFrame(rows).rename(
+                    columns={
+                        "nutrient": "Plant food" if simple else "Nutrient",
+                        "before": "Now (kg/ha)",
+                        "added": "You add (kg/ha)",
+                        "after": "After (kg/ha)",
+                    }
+                ),
+                hide_index=True,
+                width="stretch",
+            )
+
+        if simulation.unsimulated:
+            st.caption(
+                "The lime or gypsum advice above is **not** included in this "
+                "comparison. How much a dose moves your pH depends on your "
+                "soil's clay and organic matter, which this system does not "
+                "measure — so we do not guess at it."
+                if simple
+                else "Excluded from the simulation: "
+                + ", ".join(simulation.unsimulated)
+                + ". pH response is buffered by soil properties this system "
+                "does not measure."
+            )
+
+        st.markdown(f"##### {tr('price_heading', simple)}")
+        st.caption(tr("price_hint", simple))
+
+        prices: Dict[str, float] = {}
+        price_columns = st.columns(min(len(advisory.fertiliser_plan), 3))
+        for index, product in enumerate(advisory.fertiliser_plan):
+            column = price_columns[index % len(price_columns)]
+            bag_price = column.number_input(
+                f"{product} — ₹ per 50 kg bag",
+                min_value=0.0,
+                step=10.0,
+                value=0.0,
+                key=f"bagprice_{product}",
+                help="Leave at 0 if you do not know it.",
+            )
+            prices[product] = price_per_kg_from_bag(bag_price)
+
+        estimate = estimate_cost(advisory.fertiliser_plan, prices)
+        if not estimate.priced:
+            st.info(estimate.summary(simple))
+            return
+
+        cost_columns = st.columns(2)
+        cost_columns[0].metric(
+            "Fertiliser cost" if simple else "Input cost",
+            f"₹{estimate.total_per_acre:,.0f} / acre",
+        )
+        crop_price = cost_columns[1].number_input(
+            f"₹ per quintal you expect for {prediction.crop}",
+            min_value=0.0,
+            step=100.0,
+            value=0.0,
+            key="crop_price",
+            help="Your local mandi rate. Leave at 0 to skip this.",
+        )
+
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {
+                        "Fertiliser": line.product,
+                        "Per acre": f"{line.kg_per_acre:.1f} kg "
+                                    f"({line.bags_per_acre:.2f} bags)",
+                        "Cost": f"₹{line.cost_per_acre:,.0f}",
+                    }
+                    for line in estimate.lines
+                ]
+            ),
+            hide_index=True,
+            width="stretch",
+        )
+
+        break_even = estimate.break_even_message(
+            prediction.crop, crop_price, simple
+        )
+        if break_even:
+            st.success(break_even)
+        else:
+            st.caption(
+                "Enter the price you expect per quintal to see how much extra "
+                "yield this fertiliser has to earn back."
+            )
 
 
 def _persist(state: Dict[str, object]) -> None:
@@ -1180,6 +1361,38 @@ def render_audit_tab() -> None:
 
     st.dataframe(frame, hide_index=True, width="stretch", height=380)
 
+    # Reload a past reading into the form. An officer revisiting a plot should
+    # not have to retype seven numbers off a printout.
+    reload_columns = st.columns([2, 1])
+    options = {
+        f"#{int(row['id'])} · {row['district']} · {row['recommended_crop']} "
+        f"· {str(row['timestamp'])[:10]}": row
+        for _, row in frame.iterrows()
+    }
+    chosen = reload_columns[0].selectbox(
+        "Open a saved reading" if simple else "Reload a record into the form",
+        options=list(options),
+        index=0,
+        key="reload_pick",
+    )
+    if reload_columns[1].button(
+        "↩️ Load these readings", width="stretch", key="reload_go"
+    ):
+        row = options[chosen]
+        for feature, column in (
+            ("N", "N"), ("P", "P"), ("K", "K"), ("ph", "pH"),
+            ("temperature", "temp"), ("humidity", "humidity"),
+            ("rainfall", "rainfall"),
+        ):
+            low, high = FEATURE_BOUNDS[feature]
+            st.session_state[f"in_{feature}"] = float(
+                np.clip(float(row[column]), low, high)
+            )
+        st.success(
+            f"Loaded the readings from record #{int(row['id'])}. "
+            f"Press the green button at the top to run them again."
+        )
+
     buffer = io.StringIO()
     frame.to_csv(buffer, index=False)
     st.download_button(
@@ -1389,6 +1602,7 @@ def main() -> None:
         "advisory": st.session_state.get("advisory"),
         "consensus": st.session_state.get("consensus"),
         "district": st.session_state.get("district", inputs["district"]),
+        "season": inputs["season"],
         "recommender": recommender,
     }
 

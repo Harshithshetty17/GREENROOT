@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![scikit--learn](https://img.shields.io/badge/scikit--learn-1.9.0-orange)
-![Tests](https://img.shields.io/badge/tests-266%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-313%20passed-brightgreen)
 ![CV Accuracy](https://img.shields.io/badge/5--fold%20CV-99.41%25-brightgreen)
 
 A decision support system that recommends one of 22 crops from seven agronomic
@@ -74,6 +74,17 @@ an examiner. A single toggle switches every string to the technical register
 used in this document, so nothing is dumbed down, only re-worded. Fertiliser is
 quoted in bags and acres alongside kg/ha, since that is what a farmer buys and
 works.
+
+**It answers the question a farmer actually asks.** Not just *which crop*, but
+*is it the right season for it*, *what will the fertiliser do*, and *what will
+that cost me*. The season check catches the commonest real-world failure — a
+crop that suits the soil perfectly and still cannot be sown in June. The
+intervention simulation re-runs the model as if the prescribed fertiliser had
+already been applied, so the farmer sees what it buys before spending. The
+costing turns kilograms into rupees per acre and into the extra yield needed to
+break even — computed entirely from prices the farmer enters, because a
+plausible-looking national average would carry the authority of the rest of the
+system while being wrong for the person reading it.
 
 **What it does, concretely.** One cultivator at a time through the interactive
 dashboard, or a whole village at once through bulk advisory; every
@@ -638,15 +649,19 @@ GREENROOT/
 │   │   └── xai_engine.py           ExplainerConsensus: SHAP + LIME + Jaccard
 │   └── utils/
 │       ├── agronomy_advisory.py    Hydrology, nutrition, pH, thermal heuristics
+│       ├── seasons.py              Kharif / Rabi / Summer sowing windows
+│       ├── intervention.py         "What if I follow this advice?" simulation
+│       ├── economics.py            Input cost and break-even, farmer-priced
 │       ├── localisation.py         Kannada crop names and card labels
 │       ├── plain_language.py       Farmer register, bag/acre units
 │       └── report_generator.py     PDF / HTML / Markdown / text health card
 │
-└── tests/                      266 tests, 1 environment-conditional skip
+└── tests/                      313 tests, 1 environment-conditional skip
     ├── test_models.py              Validation, calibration, sweep, Jaccard
     ├── test_services.py            Mocked transports, district resolution
     ├── test_database.py            CRUD, migration, rollback, concurrency
     ├── test_batch.py               Column resolution, row isolation, Kannada
+    ├── test_decision_support.py    Seasons, simulation, costing honesty
     ├── test_presentation.py        Palette gates, unit conversion, jargon
     └── test_validation_statistics.py
                                     Corrected t-test, ECE, Brier score
@@ -685,12 +700,13 @@ pytest -v
 
 ```text
 tests/test_batch.py                 ......................  54 passed
+tests/test_decision_support.py      ......................  47 passed
 tests/test_database.py              ......................  44 passed
 tests/test_models.py                ......................  72 passed
 tests/test_presentation.py          ......................  37 passed
 tests/test_services.py              ......................  42 passed, 1 skipped
 tests/test_validation_statistics.py ......................  17 passed
-============== 266 passed, 1 skipped in 4.88s ==============
+============== 313 passed, 1 skipped in 4.89s ==============
 ```
 
 Coverage of note:
@@ -719,6 +735,11 @@ Coverage of note:
   verified to contain actual Kannada codepoints (guarding against an English
   string left in the translation column), and every bilingual string is
   asserted to still contain its English term.
+- **Decision support** — nutrient grades are asserted to invert exactly
+  (100 kg urea supplies 46 kg N); amended readings are checked to stay inside
+  the validator's envelope; costing is verified to be **per acre, not per
+  hectare** (a 2.47× error would be invisible and expensive); and the costing
+  is asserted to return *nothing* rather than a guess when no price is given.
 - **Presentation** — the categorical palette is asserted to refuse a ninth
   series rather than generate one (a generated hue is indistinguishable under
   colour-vision deficiency); hectare→acre conversion is checked against its
@@ -791,6 +812,25 @@ is neither good nor bad; and crop counts use one hue for one series rather than
 a value ramp. Orderings led by the brand green were tested and rejected — they
 pass in light mode but fall into the warning band in dark — so the brand green
 carries chrome and single-series marks instead.
+
+**Season windows are indicative, not authoritative.** The sowing calendar in
+`src/utils/seasons.py` follows standard Indian practice and is broadly right for
+peninsular India, but dates shift with latitude, irrigation and local custom. A
+mismatch is surfaced as "check this", never as a prohibition, and an unknown
+crop is never flagged — a gap in the table is the system's problem, not the
+farmer's.
+
+**The intervention simulation excludes pH.** It applies the nutrient additions
+the prescription supplies and re-scores them, but the pH response to a lime or
+gypsum dose depends on the soil's buffering capacity — clay, organic matter,
+CEC — none of which this system measures. Modelling it from seven inputs would
+be inventing a number, so the dashboard reports the amendment as advice and
+states that its effect is outside the comparison.
+
+**The system ships no prices.** Fertiliser and crop prices vary by district,
+season and subsidy status. Every figure in the costing comes from what the
+farmer enters for their own dealer and mandi, and nothing is displayed until
+they do.
 
 **Kannada translations are unreviewed.** The bilingual card is a prototype
 mapping prepared for this project and has **not** been checked by a native

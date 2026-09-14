@@ -1,6 +1,6 @@
 # GREENROOT — System Evaluation Summary
 
-_Generated 2026-09-13 17:14:42_
+_Generated 2026-09-14 04:18:05_
 
 ## 1. Classification Performance
 
@@ -21,17 +21,17 @@ Stratified 20% hold-out of `Crop_recommendation.csv` (2,200 samples, 22 classes)
 
 ## 2. Inference Latency
 
-20 stochastic single-sample inferences, end-to-end (validation + scaling + stacked forward pass).
+15 stochastic single-sample inferences, end-to-end (validation + scaling + stacked forward pass).
 
 | Statistic | Latency (ms) |
 |---|---:|
-| Mean | 15.298 |
-| P50 | 15.267 |
-| P95 | 15.930 |
-| P99 | 16.163 |
-| Max | 16.222 |
+| Mean | 15.506 |
+| P50 | 15.369 |
+| P95 | 16.678 |
+| P99 | 16.889 |
+| Max | 16.942 |
 
-Sustained throughput: **65 inferences/s** single-threaded.
+Sustained throughput: **64 inferences/s** single-threaded.
 
 ## 3. Out-of-Distribution Robustness
 
@@ -39,11 +39,11 @@ Karnataka NFSM field survey rows, which carry genuine covariate shift relative t
 
 | Metric | Value |
 |---|---:|
-| Field samples | 100 |
-| Mean confidence (benchmark) | 0.9677 |
-| Mean confidence (field) | 0.4159 |
-| Confidence degradation | 0.5517 |
-| Mean \|Z\| under shift | 2.513 |
+| Field samples | 60 |
+| Mean confidence (benchmark) | 0.9712 |
+| Mean confidence (field) | 0.4152 |
+| Confidence degradation | 0.5560 |
+| Mean \|Z\| under shift | 2.472 |
 | OOD detection rate | 100.0% |
 
 ## Artefacts

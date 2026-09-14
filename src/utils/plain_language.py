@@ -133,6 +133,25 @@ COPY: Dict[str, Tuple[str, str]] = {
     "sidebar_place": ("📍 Your Place", "📍 Location & Climate"),
     "sidebar_soil": ("🧪 Your Soil Test", "🧪 Soil Chemistry"),
     "sidebar_weather": ("🌤️ Weather on Your Land", "🌡️ Microclimate"),
+    "sidebar_season": ("📅 Sowing Season", "📅 Cropping Season"),
+    "season_ok": ("Right season for this crop", "Season compatible"),
+    "season_clash": ("Wrong season for this crop", "Season mismatch"),
+    "worth_heading": (
+        "Will this fertiliser be worth it?",
+        "Intervention simulation and input costing",
+    ),
+    "worth_intro": (
+        "We re-check your land as if you had already added the fertiliser "
+        "above, so you can see what it buys before you spend anything.",
+        "The prescription is converted back into nutrient additions, applied "
+        "to the readings, and re-scored through the same inference path.",
+    ),
+    "price_heading": ("What do you pay for fertiliser?", "Local input prices"),
+    "price_hint": (
+        "Enter the price of one 50 kg bag at your dealer. We do not guess "
+        "prices — they change too much between places.",
+        "Per-bag prices are farmer-supplied; no defaults ship with the system.",
+    ),
     "district": ("Your district or taluk", "District / Taluk"),
     "get_weather": ("🌦️ Get today's weather", "🌦️ Sync live weather"),
     "load_baseline": (

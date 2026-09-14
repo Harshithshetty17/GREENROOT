@@ -37,7 +37,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 import bcrypt
 
@@ -204,7 +204,7 @@ def register(
     display_name: Optional[str] = None,
     district: Optional[str] = None,
     db_path: Optional[Path] = None,
-) -> User:
+) -> Tuple[User, str]:
     """Create an account.
 
     Returns the user **and a one-time recovery code**. Show that code once,
@@ -321,7 +321,7 @@ def sign_in(
 
 def reset_pin_with_code(
     phone: str, code: str, new_pin: str, *, db_path: Optional[Path] = None
-) -> User:
+) -> Tuple[User, str]:
     """Set a new PIN using the recovery code, for someone who forgot theirs.
 
     Without this the account is simply lost, which is what the first version

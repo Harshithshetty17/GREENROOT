@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 and below. Saved cards are the farmer's own records and are
+     worth carrying to a new phone; cookies and the WebView cache are not. -->
+<full-backup-content>
+    <include domain="file" path="saved_cards.json" />
+    <exclude domain="file" path="" />
+</full-backup-content>

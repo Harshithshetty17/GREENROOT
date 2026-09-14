@@ -38,6 +38,7 @@ from src.core.config import (
     OOD_ZSCORE_THRESHOLD,
     REPORTED_CV_ACCURACY,
 )
+from src.core import native
 from src.core.pwa import install as install_pwa
 from src.core.theme import (
     BRAND,
@@ -893,6 +894,22 @@ def _persist(state: Dict[str, object]) -> None:
         st.error(f"Could not persist the recommendation: {exc}")
         return
     st.success(f"Committed to the audit ledger as record #{record_id}.")
+
+    # Inside the Android shell, put a copy on the phone itself: the ledger
+    # above lives on the server, and the farmer standing in the field is the
+    # one who needs to read this back with no signal. A no-op in a browser.
+    advisory = state.get("advisory")
+    native.push_card(
+        st,
+        native.build_card(
+            card_id=str(record_id),
+            crop=prediction.crop,
+            confidence=prediction.confidence,
+            district=str(state["district"]),
+            readings=native.readings_summary(features),
+            advice=native.advice_lines(advisory, is_simple()) if advisory else [],
+        ),
+    )
 
 
 # --------------------------------------------------------------------------- #

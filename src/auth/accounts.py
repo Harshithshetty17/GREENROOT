@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import logging
 import re
+import secrets
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -62,6 +63,37 @@ _BANNED_PINS = frozenset(
 #: bcrypt work factor. 12 is ~0.3s per verification on commodity hardware --
 #: unnoticeable to a person, ruinous to a brute-force loop.
 BCRYPT_ROUNDS: int = 12
+
+#: Recovery-code alphabet. No I, L, O, U, 0 or 1: this gets written on paper
+#: and read back by someone who did not write it, and those are the
+#: characters people confuse.
+_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+#: Characters per group, and groups per code. 30**8 is about 6.5e11 -- far
+#: beyond guessing, and still short enough to write on the back of a card.
+_CODE_GROUP: int = 4
+_CODE_GROUPS: int = 2
+
+
+def generate_recovery_code() -> str:
+    """A fresh code, formatted as ``ABCD-EFGH`` for reading aloud."""
+    groups = [
+        "".join(secrets.choice(_CODE_ALPHABET) for _ in range(_CODE_GROUP))
+        for _ in range(_CODE_GROUPS)
+    ]
+    return "-".join(groups)
+
+
+def _normalise_code(code: str) -> str:
+    """Accept a code however it was written down.
+
+    Lower case, missing dashes and stray spaces are all the same code. The
+    two most common transcription slips are folded in as well: someone who
+    writes O for zero or l for one is corrected rather than refused, since
+    neither character is in the alphabet.
+    """
+    text = re.sub(r"[^0-9A-Za-z]", "", str(code)).upper()
+    return text.translate(str.maketrans({"O": "0", "I": "1", "L": "1"}))
 
 
 class AuthError(Exception):
@@ -173,9 +205,15 @@ def register(
     district: Optional[str] = None,
     db_path: Optional[Path] = None,
 ) -> User:
-    """Create an account. Raises if the number is already registered."""
+    """Create an account.
+
+    Returns the user **and a one-time recovery code**. Show that code once,
+    tell them to write it down, and never display it again: only its hash is
+    kept, so it cannot be looked up or re-shown.
+    """
     number = normalise_phone(phone)
     checked = _validate_pin(pin)
+    code = generate_recovery_code()
 
     with get_connection(db_path, write=True) as conn:
         existing = conn.execute(
@@ -188,15 +226,20 @@ def register(
             )
         cursor = conn.execute(
             f"INSERT INTO {USERS_TABLE} "
-            f"(phone, pin_hash, display_name, district, created_at) "
-            f"VALUES (?, ?, ?, ?, ?);",
-            (number, _hash_pin(checked), display_name, district, _stamp()),
+            f"(phone, pin_hash, display_name, district, created_at, "
+            f"recovery_hash) VALUES (?, ?, ?, ?, ?, ?);",
+            (
+                number, _hash_pin(checked), display_name, district, _stamp(),
+                _hash_pin(_normalise_code(code)),
+            ),
         )
         row = conn.execute(
             f"SELECT * FROM {USERS_TABLE} WHERE id = ?;", (cursor.lastrowid,)
         ).fetchone()
     logger.info("Account created for %s", User(0, number).masked_phone)
-    return _row_to_user(row)
+    # The plaintext code is returned exactly once, here. It is never stored
+    # and cannot be recovered -- which is the point of it.
+    return _row_to_user(row), code
 
 
 def sign_in(
@@ -274,6 +317,127 @@ def sign_in(
             f"SELECT * FROM {USERS_TABLE} WHERE id = ?;", (row["id"],)
         ).fetchone()
     return _row_to_user(fresh)
+
+
+def reset_pin_with_code(
+    phone: str, code: str, new_pin: str, *, db_path: Optional[Path] = None
+) -> User:
+    """Set a new PIN using the recovery code, for someone who forgot theirs.
+
+    Without this the account is simply lost, which is what the first version
+    of this module did -- it told people to start again and described that as
+    policy. For a farmer who signed in once and comes back a season later,
+    that is their history gone.
+
+    The same lockout guards this path. Recovery that is not rate-limited is
+    not recovery, it is a second, unguarded door into the account: an
+    attacker would simply brute-force the code instead of the PIN. Using the
+    code also burns it, and issues a fresh one.
+    """
+    number = normalise_phone(phone)
+    checked = _validate_pin(new_pin)
+    refusal = "Wrong number or recovery code."
+
+    with get_connection(db_path) as conn:
+        row = conn.execute(
+            f"SELECT * FROM {USERS_TABLE} WHERE phone = ?;", (number,)
+        ).fetchone()
+    if row is None:
+        raise AuthError(refusal)
+
+    locked_until = row["locked_until"]
+    if locked_until and datetime.fromisoformat(locked_until) > _now():
+        raise LockedOut(
+            "Too many failed attempts. Wait for the lock to clear before "
+            "using your recovery code."
+        )
+
+    stored = row["recovery_hash"]
+    if not stored:
+        raise AuthError(
+            "This account has no recovery code. It was created before "
+            "recovery codes existed — sign in with your PIN and make one in "
+            "Settings."
+        )
+
+    if not _pin_matches(_normalise_code(code), str(stored)):
+        failed = int(row["failed_count"]) + 1
+        now_locked = failed >= MAX_FAILED_ATTEMPTS
+        lock = (
+            (_now() + timedelta(minutes=LOCKOUT_MINUTES)).isoformat(
+                timespec="seconds")
+            if now_locked
+            else None
+        )
+        # Committed before raising; see the note in sign_in().
+        with get_connection(db_path, write=True) as conn:
+            conn.execute(
+                f"UPDATE {USERS_TABLE} SET failed_count = ?, locked_until = ? "
+                f"WHERE id = ?;",
+                (failed, lock, row["id"]),
+            )
+        if now_locked:
+            raise LockedOut(
+                f"Too many failed attempts. Locked for {LOCKOUT_MINUTES} "
+                f"minutes."
+            )
+        raise AuthError(refusal)
+
+    # Correct. Set the new PIN, burn the used code, mint a replacement, and
+    # end every existing session -- a PIN reset must log out anyone already
+    # holding one.
+    fresh_code = generate_recovery_code()
+    from src.database.db_manager import SESSIONS_TABLE
+
+    with get_connection(db_path, write=True) as conn:
+        conn.execute(
+            f"UPDATE {USERS_TABLE} SET pin_hash = ?, recovery_hash = ?, "
+            f"failed_count = 0, locked_until = NULL WHERE id = ?;",
+            (_hash_pin(checked), _hash_pin(_normalise_code(fresh_code)),
+             row["id"]),
+        )
+        conn.execute(
+            f"DELETE FROM {SESSIONS_TABLE} WHERE user_id = ?;", (row["id"],)
+        )
+        updated = conn.execute(
+            f"SELECT * FROM {USERS_TABLE} WHERE id = ?;", (row["id"],)
+        ).fetchone()
+    logger.info("PIN reset by recovery code for account %s", row["id"])
+    return _row_to_user(updated), fresh_code
+
+
+def regenerate_recovery_code(
+    user_id: int, pin: str, *, db_path: Optional[Path] = None
+) -> str:
+    """Mint a new recovery code, replacing any existing one.
+
+    Requires the current PIN: otherwise anyone with a borrowed unlocked phone
+    could mint themselves a permanent key to the account.
+    """
+    with get_connection(db_path) as conn:
+        row = conn.execute(
+            f"SELECT pin_hash FROM {USERS_TABLE} WHERE id = ?;", (user_id,)
+        ).fetchone()
+    if row is None or not _pin_matches(
+        re.sub(r"\D", "", str(pin)), str(row["pin_hash"])
+    ):
+        raise AuthError("The PIN is wrong.")
+
+    code = generate_recovery_code()
+    with get_connection(db_path, write=True) as conn:
+        conn.execute(
+            f"UPDATE {USERS_TABLE} SET recovery_hash = ? WHERE id = ?;",
+            (_hash_pin(_normalise_code(code)), user_id),
+        )
+    return code
+
+
+def has_recovery_code(user_id: int, *, db_path: Optional[Path] = None) -> bool:
+    with get_connection(db_path) as conn:
+        row = conn.execute(
+            f"SELECT recovery_hash FROM {USERS_TABLE} WHERE id = ?;", (user_id,)
+        ).fetchone()
+    return bool(row and row["recovery_hash"])
 
 
 def change_pin(

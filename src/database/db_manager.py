@@ -42,7 +42,7 @@ _THREAD_LOCAL = threading.local()
 
 #: Schema version, bumped whenever :data:`_SCHEMA` changes shape. Persisted in
 #: SQLite's ``user_version`` pragma and used to drive forward migrations.
-SCHEMA_VERSION: int = 2
+SCHEMA_VERSION: int = 3
 
 TABLE_NAME: str = "audit_logs"
 
@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS {USERS_TABLE} (
     district      TEXT,
     acres         REAL    CHECK (acres IS NULL OR acres > 0),
     language      TEXT    NOT NULL DEFAULT 'en',
+    recovery_hash TEXT,
     created_at    TEXT    NOT NULL,
     last_login_at TEXT,
     failed_count  INTEGER NOT NULL DEFAULT 0,
@@ -318,6 +319,17 @@ def _migrate(conn: sqlite3.Connection) -> None:
         if existing and column not in existing:
             conn.execute(f"ALTER TABLE {TABLE_NAME} ADD COLUMN {column} {ddl};")
             logger.info("Migrated: added column %s.%s", TABLE_NAME, column)
+
+    # v3: a one-time recovery code, so a forgotten PIN does not destroy the
+    # account. Nullable, so accounts created under v2 keep working and can
+    # mint a code from Settings whenever they next sign in.
+    user_columns = {
+        str(row["name"])
+        for row in conn.execute(f"PRAGMA table_info({USERS_TABLE});").fetchall()
+    }
+    if user_columns and "recovery_hash" not in user_columns:
+        conn.execute(f"ALTER TABLE {USERS_TABLE} ADD COLUMN recovery_hash TEXT;")
+        logger.info("Migrated: added column %s.recovery_hash", USERS_TABLE)
 
     # The v2 tables are created by _create_all, which runs before this and is
     # idempotent; nothing to backfill for them.

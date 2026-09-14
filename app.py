@@ -242,6 +242,16 @@ _CSS = """
               line-height: 1.25; }
   .gr-wx .s { font-size: 11px; color: #5c6f63; }
 
+  /* A recovery code is transcribed by hand onto paper. Big, monospaced and
+     widely spaced so 8 and B cannot be confused at a glance. */
+  .gr-code {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 27px; font-weight: 700; letter-spacing: 3px;
+    text-align: center; color: #14281d;
+    background: #fff; border: 2px dashed #c9a227; border-radius: 10px;
+    padding: 14px 8px; margin: 6px 0 4px;
+  }
+
   /* ---- Badges & metrics ----------------------------------------------- */
   .gr-badge {
     display: inline-block; padding: 5px 14px; border-radius: 999px;
@@ -523,6 +533,23 @@ def render_account_sidebar(simple: bool) -> None:
     user = current_user()
     st.sidebar.markdown("---")
 
+    # Shown once, immediately after sign-up or a reset. Only the hash is
+    # stored, so there is no second chance to display it.
+    fresh = st.session_state.get("fresh_recovery_code")
+    if fresh:
+        st.sidebar.warning("**Write this down now**")
+        st.sidebar.markdown(
+            f"<div class='gr-code'>{fresh}</div>", unsafe_allow_html=True
+        )
+        st.sidebar.caption(
+            "This is the only way back into your account if you forget your "
+            "PIN. We cannot show it again and we cannot look it up. There is "
+            "no letter O and no number 1 in these codes."
+        )
+        if st.sidebar.button("I have written it down", width="stretch"):
+            st.session_state.pop("fresh_recovery_code", None)
+            st.rerun()
+
     if user is None:
         st.sidebar.markdown("#### Your account")
         st.sidebar.caption(
@@ -548,16 +575,45 @@ def render_account_sidebar(simple: bool) -> None:
                     st.error(str(exc))
             if make.button("Create", width="stretch"):
                 try:
-                    created = auth.register(phone, pin, display_name=name or None,
-                                            district=st.session_state.get(
-                                                "district_pick"))
+                    created, recovery = auth.register(
+                        phone, pin, display_name=name or None,
+                        district=st.session_state.get("district_pick"))
                     st.session_state["auth_token"] = auth.issue_token(created.id)
+                    # Shown exactly once. Only its hash is kept, so it can
+                    # never be displayed again.
+                    st.session_state["fresh_recovery_code"] = recovery
                     st.rerun()
                 except auth.AuthError as exc:
                     st.error(str(exc))
             st.caption(
                 "Your PIN is stored scrambled and cannot be read back, even "
                 "by us. Do not use 1234 or your birth year."
+            )
+
+        with st.sidebar.expander("Forgot your PIN?", expanded=False):
+            st.caption(
+                "Use the recovery code you wrote down when you created the "
+                "account."
+            )
+            r_phone = st.text_input("Mobile number", key="rec_phone",
+                                    placeholder="9876543210", max_chars=15)
+            r_code = st.text_input("Recovery code", key="rec_code",
+                                   placeholder="ABCD-EFGH", max_chars=12)
+            r_pin = st.text_input("New PIN", key="rec_pin", type="password",
+                                  max_chars=6)
+            if st.button("Reset my PIN", width="stretch", key="rec_go"):
+                try:
+                    restored, replacement = auth.reset_pin_with_code(
+                        r_phone, r_code, r_pin)
+                    st.session_state["auth_token"] = auth.issue_token(
+                        restored.id)
+                    st.session_state["fresh_recovery_code"] = replacement
+                    st.rerun()
+                except auth.AuthError as exc:
+                    st.error(str(exc))
+            st.caption(
+                "Using a code cancels it. You will get a new one to write "
+                "down."
             )
         return
 
@@ -587,6 +643,55 @@ def render_account_sidebar(simple: bool) -> None:
             st.success("Saved.")
             st.rerun()
 
+    with st.sidebar.expander("My fields", expanded=False):
+        st.caption(
+            "Save each field once, then load it instead of retyping the "
+            "readings."
+        )
+        saved = auth.list_plots(user.id)
+        if saved:
+            picked = st.selectbox(
+                "Your saved fields",
+                options=saved,
+                format_func=lambda p: p.label,
+                key="plot_pick",
+            )
+            st.caption(picked.summary())
+            load, drop = st.columns(2)
+            if load.button("Load", width="stretch", key="plot_load"):
+                # Writing straight into the widget keys is what makes this a
+                # load rather than a suggestion.
+                for feature, value in picked.readings.items():
+                    st.session_state[f"in_{feature}"] = float(
+                        np.clip(value, *FEATURE_BOUNDS[feature]))
+                st.session_state["district_pick"] = picked.district
+                st.session_state["acres"] = float(picked.acres)
+                st.session_state.pop("prediction", None)
+                st.rerun()
+            if drop.button("Delete", width="stretch", key="plot_drop"):
+                auth.delete_plot(user.id, picked.id)
+                st.rerun()
+        else:
+            st.caption("No fields saved yet.")
+
+        st.markdown("---")
+        new_name = st.text_input("Save these readings as", key="plot_name",
+                                 placeholder="North field", max_chars=40)
+        if st.button("Save this field", width="stretch", key="plot_save"):
+            try:
+                auth.save_plot(
+                    user.id,
+                    new_name,
+                    st.session_state.get("district_pick", ""),
+                    float(st.session_state.get("acres", 1.0)),
+                    {f: float(st.session_state[f"in_{f}"])
+                     for f in FEATURE_NAMES},
+                )
+                st.success("Saved.")
+                st.rerun()
+            except auth.PlotError as exc:
+                st.error(str(exc))
+
     with st.sidebar.expander("Settings", expanded=False):
         st.caption(
             "An English-only interface today. Kannada is planned; the crop "
@@ -601,6 +706,29 @@ def render_account_sidebar(simple: bool) -> None:
             try:
                 auth.change_pin(user.id, old, new)
                 st.success("PIN changed.")
+            except auth.AuthError as exc:
+                st.error(str(exc))
+
+        st.markdown("---")
+        st.markdown("**Recovery code**")
+        if auth.has_recovery_code(user.id):
+            st.caption(
+                "You have one. Making a new code cancels the old one, so only "
+                "do this if you have lost it."
+            )
+        else:
+            st.caption(
+                "This account has no recovery code — it was made before they "
+                "existed. Make one now, or a forgotten PIN will lock you out "
+                "for good."
+            )
+        rc_pin = st.text_input("Your PIN, to confirm", type="password",
+                               key="rc_pin", max_chars=6)
+        if st.button("Make a new recovery code", width="stretch", key="rc_go"):
+            try:
+                st.session_state["fresh_recovery_code"] = (
+                    auth.regenerate_recovery_code(user.id, rc_pin))
+                st.rerun()
             except auth.AuthError as exc:
                 st.error(str(exc))
 

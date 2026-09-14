@@ -22,8 +22,9 @@ def db(tmp_path):
 
 @pytest.fixture
 def alice(db):
-    return auth.register("9876543210", "4729", display_name="Alice",
-                         district="Udupi", db_path=db)
+    user, _code = auth.register("9876543210", "4729", display_name="Alice",
+                                district="Udupi", db_path=db)
+    return user
 
 
 LOG = dict(n=60, p=40, k=45, ph=6.2, temperature=26, humidity=78,
@@ -226,8 +227,8 @@ class TestSessions:
 class TestLedgerIsolation:
     @pytest.fixture
     def two_users(self, db):
-        a = auth.register("9876543210", "4729", db_path=db)
-        b = auth.register("9000000002", "8351", db_path=db)
+        a, _ = auth.register("9876543210", "4729", db_path=db)
+        b, _ = auth.register("9000000002", "8351", db_path=db)
         dbm.log_transaction(district="Udupi", recommended_crop="jute",
                             user_id=a.id, db_path=db, **LOG)
         dbm.log_transaction(district="Mysuru", recommended_crop="rice",
@@ -277,7 +278,7 @@ class TestProfile:
         assert updated.display_name == "Alice"
 
     def test_greeting_falls_back_to_a_masked_number(self, db):
-        anon = auth.register("9000000003", "8351", db_path=db)
+        anon, _ = auth.register("9000000003", "8351", db_path=db)
         assert anon.greeting == "•••••00003"
 
 
@@ -321,7 +322,7 @@ class TestDeleteAccount:
 
     def test_the_number_can_register_again_afterwards(self, db, alice):
         auth.delete_account(alice.id, db_path=db)
-        fresh = auth.register("9876543210", "8351", db_path=db)
+        fresh, _ = auth.register("9876543210", "8351", db_path=db)
         assert fresh.id != alice.id
 
 
@@ -350,7 +351,7 @@ class TestMigration:
 
         dbm.init_db(path)
 
-        assert dbm.get_schema_version(path) == 2
+        assert dbm.get_schema_version(path) == dbm.SCHEMA_VERSION
         rows = dbm.fetch_audit_history(db_path=path)
         assert len(rows) == 1
         assert rows.recommended_crop.iloc[0] == "jute"
@@ -365,3 +366,214 @@ class TestMigration:
         conn.close()
         assert {dbm.USERS_TABLE, dbm.SESSIONS_TABLE,
                 dbm.PLOTS_TABLE} <= names
+
+
+# --------------------------------------------------------------------------- #
+# PIN recovery
+# --------------------------------------------------------------------------- #
+class TestRecovery:
+    @pytest.fixture
+    def account(self, db):
+        user, code = auth.register("9876543210", "4729", db_path=db)
+        return user, code
+
+    def test_registration_returns_a_code(self, account):
+        _, code = account
+        assert len(code.replace("-", "")) == 8
+        assert "-" in code
+
+    def test_code_is_stored_hashed_not_in_the_clear(self, db, account):
+        user, code = account
+        conn = sqlite3.connect(db)
+        stored = conn.execute(
+            f"SELECT recovery_hash FROM {dbm.USERS_TABLE} WHERE id=?;",
+            (user.id,)).fetchone()[0]
+        conn.close()
+        assert code.replace("-", "") not in stored
+        assert stored.startswith("$2")
+
+    def test_a_forgotten_pin_can_be_reset(self, db, account):
+        user, code = account
+        auth.reset_pin_with_code("9876543210", code, "8351", db_path=db)
+        assert auth.sign_in("9876543210", "8351", db_path=db).id == user.id
+
+    def test_the_old_pin_stops_working(self, db, account):
+        _, code = account
+        auth.reset_pin_with_code("9876543210", code, "8351", db_path=db)
+        with pytest.raises(auth.AuthError):
+            auth.sign_in("9876543210", "4729", db_path=db)
+
+    @pytest.mark.parametrize("style", [
+        str.lower, lambda c: c.replace("-", ""),
+        lambda c: f"  {c}  ", lambda c: c.replace("-", " "),
+    ])
+    def test_code_is_accepted_however_it_was_written_down(self, db, account, style):
+        _, code = account
+        auth.reset_pin_with_code("9876543210", style(code), "8351", db_path=db)
+        assert auth.sign_in("9876543210", "8351", db_path=db)
+
+    def test_wrong_code_is_refused(self, db, account):
+        with pytest.raises(auth.AuthError):
+            auth.reset_pin_with_code("9876543210", "AAAA-BBBB", "8351",
+                                     db_path=db)
+
+    def test_recovery_is_rate_limited_too(self, db, account):
+        """Otherwise it is a second, unguarded door into the account.
+
+        An attacker would simply brute-force the recovery code instead of the
+        PIN, and the PIN lockout would have bought nothing.
+        """
+        for _ in range(accounts.MAX_FAILED_ATTEMPTS - 1):
+            with pytest.raises(auth.AuthError):
+                auth.reset_pin_with_code("9876543210", "AAAA-BBBB", "8351",
+                                         db_path=db)
+        with pytest.raises(auth.LockedOut):
+            auth.reset_pin_with_code("9876543210", "AAAA-BBBB", "8351",
+                                     db_path=db)
+
+    def test_a_used_code_is_burned(self, db, account):
+        _, code = account
+        auth.reset_pin_with_code("9876543210", code, "8351", db_path=db)
+        with pytest.raises(auth.AuthError):
+            auth.reset_pin_with_code("9876543210", code, "2468", db_path=db)
+
+    def test_reset_issues_a_fresh_code(self, db, account):
+        _, code = account
+        _, new_code = auth.reset_pin_with_code("9876543210", code, "8351",
+                                               db_path=db)
+        assert new_code != code
+        auth.reset_pin_with_code("9876543210", new_code, "2468", db_path=db)
+
+    def test_reset_ends_every_existing_session(self, db, account):
+        user, code = account
+        token = auth.issue_token(user.id, db_path=db)
+        auth.reset_pin_with_code("9876543210", code, "8351", db_path=db)
+        assert auth.user_for_token(token, db_path=db) is None
+
+    def test_new_pin_must_still_be_strong(self, db, account):
+        _, code = account
+        with pytest.raises(auth.WeakPin):
+            auth.reset_pin_with_code("9876543210", code, "1234", db_path=db)
+
+    def test_regenerating_requires_the_pin(self, db, account):
+        user, _ = account
+        with pytest.raises(auth.AuthError):
+            auth.regenerate_recovery_code(user.id, "0000", db_path=db)
+        fresh = auth.regenerate_recovery_code(user.id, "4729", db_path=db)
+        assert len(fresh.replace("-", "")) == 8
+
+    def test_regenerating_invalidates_the_old_code(self, db, account):
+        user, code = account
+        auth.regenerate_recovery_code(user.id, "4729", db_path=db)
+        with pytest.raises(auth.AuthError):
+            auth.reset_pin_with_code("9876543210", code, "8351", db_path=db)
+
+    def test_codes_avoid_ambiguous_characters(self):
+        """These get written on paper and read back by someone else."""
+        codes = "".join(auth.generate_recovery_code() for _ in range(200))
+        assert not (set("OIL01U") & set(codes))
+
+    def test_a_v2_account_without_a_code_says_so_clearly(self, db, account):
+        user, _ = account
+        conn = sqlite3.connect(db)
+        conn.execute(f"UPDATE {dbm.USERS_TABLE} SET recovery_hash=NULL "
+                     f"WHERE id=?;", (user.id,))
+        conn.commit(); conn.close()
+        assert auth.has_recovery_code(user.id, db_path=db) is False
+        with pytest.raises(auth.AuthError, match="no recovery code"):
+            auth.reset_pin_with_code("9876543210", "AAAA-BBBB", "8351",
+                                     db_path=db)
+
+
+# --------------------------------------------------------------------------- #
+# Saved plots
+# --------------------------------------------------------------------------- #
+FEATURES = {"N": 60.0, "P": 40.0, "K": 45.0, "ph": 6.2,
+            "temperature": 26.0, "humidity": 78.0, "rainfall": 190.0}
+
+
+class TestPlots:
+    @pytest.fixture
+    def alice_id(self, db):
+        user, _ = auth.register("9876543210", "4729", db_path=db)
+        return user.id
+
+    def test_save_and_read_back(self, db, alice_id):
+        saved = auth.save_plot(alice_id, "North field", "Udupi", 2.0,
+                               FEATURES, db_path=db)
+        assert saved.name == "North field"
+        assert saved.readings["ph"] == 6.2
+        assert saved.readings["temperature"] == 26.0
+
+    def test_listed_for_its_owner(self, db, alice_id):
+        auth.save_plot(alice_id, "North", "Udupi", 2.0, FEATURES, db_path=db)
+        auth.save_plot(alice_id, "South", "Udupi", 1.0, FEATURES, db_path=db)
+        assert {p.name for p in auth.list_plots(alice_id, db_path=db)} == {
+            "North", "South"}
+
+    def test_one_user_cannot_read_anothers_plot(self, db, alice_id):
+        other, _ = auth.register("9000000002", "8351", db_path=db)
+        mine = auth.save_plot(alice_id, "North", "Udupi", 2.0, FEATURES,
+                              db_path=db)
+        assert auth.get_plot(other.id, mine.id, db_path=db) is None
+        assert auth.list_plots(other.id, db_path=db) == []
+
+    def test_one_user_cannot_delete_anothers_plot(self, db, alice_id):
+        other, _ = auth.register("9000000002", "8351", db_path=db)
+        mine = auth.save_plot(alice_id, "North", "Udupi", 2.0, FEATURES,
+                              db_path=db)
+        assert auth.delete_plot(other.id, mine.id, db_path=db) is False
+        assert auth.get_plot(alice_id, mine.id, db_path=db) is not None
+
+    def test_resaving_a_name_updates_rather_than_duplicates(self, db, alice_id):
+        auth.save_plot(alice_id, "North", "Udupi", 2.0, FEATURES, db_path=db)
+        changed = {**FEATURES, "N": 99.0}
+        auth.save_plot(alice_id, "North", "Udupi", 3.0, changed, db_path=db)
+        plots = auth.list_plots(alice_id, db_path=db)
+        assert len(plots) == 1
+        assert plots[0].readings["N"] == 99.0
+        assert plots[0].acres == 3.0
+
+    def test_name_is_whitespace_normalised(self, db, alice_id):
+        p = auth.save_plot(alice_id, "  North   field  ", "Udupi", 1.0,
+                           FEATURES, db_path=db)
+        assert p.name == "North field"
+
+    @pytest.mark.parametrize("bad", ["", "   "])
+    def test_a_nameless_plot_is_refused(self, db, alice_id, bad):
+        with pytest.raises(auth.PlotError):
+            auth.save_plot(alice_id, bad, "Udupi", 1.0, FEATURES, db_path=db)
+
+    def test_missing_readings_are_refused(self, db, alice_id):
+        with pytest.raises(auth.PlotError, match="Missing readings"):
+            auth.save_plot(alice_id, "North", "Udupi", 1.0, {"N": 1.0},
+                           db_path=db)
+
+    def test_zero_acres_is_refused(self, db, alice_id):
+        with pytest.raises(auth.PlotError):
+            auth.save_plot(alice_id, "North", "Udupi", 0.0, FEATURES,
+                           db_path=db)
+
+    def test_the_cap_is_enforced(self, db, alice_id):
+        for i in range(auth.MAX_PLOTS_PER_USER):
+            auth.save_plot(alice_id, f"Field {i}", "Udupi", 1.0, FEATURES,
+                           db_path=db)
+        with pytest.raises(auth.PlotError, match="Delete one"):
+            auth.save_plot(alice_id, "One more", "Udupi", 1.0, FEATURES,
+                           db_path=db)
+
+    def test_deleting_an_account_removes_its_plots(self, db, alice_id):
+        auth.save_plot(alice_id, "North", "Udupi", 2.0, FEATURES, db_path=db)
+        auth.delete_account(alice_id, db_path=db)
+        assert auth.count_plots(alice_id, db_path=db) == 0
+
+    def test_readings_round_trip_into_model_feature_names(self, db, alice_id):
+        from src.core.config import FEATURE_NAMES
+        saved = auth.save_plot(alice_id, "North", "Udupi", 2.0, FEATURES,
+                               db_path=db)
+        assert set(saved.readings) == set(FEATURE_NAMES)
+
+    def test_label_reads_as_one_line(self, db, alice_id):
+        p = auth.save_plot(alice_id, "North", "Udupi", 1.0, FEATURES,
+                           db_path=db)
+        assert p.label == "North · Udupi · 1 acre"

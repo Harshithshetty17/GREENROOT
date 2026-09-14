@@ -35,9 +35,16 @@ advertising, or crash-reporting SDK.
 ## About your PIN
 
 Your PIN is never stored. What is stored is a bcrypt hash of it, which cannot
-be reversed — nobody, including us, can read your PIN back or recover it for
-you. If you forget it, the account cannot be unlocked and you would need to
-start a new one.
+be reversed — nobody, including us, can read your PIN back.
+
+**If you forget your PIN, use your recovery code.** You are shown an
+eight-character code once, when you create the account. Write it down and keep
+it somewhere safe: it is the only way back in, we cannot show it to you again,
+and we cannot look it up. Using it sets a new PIN and gives you a fresh code.
+
+Recovery codes are stored the same way as PINs — hashed, never in the clear.
+Wrong codes count towards the same lockout as wrong PINs, so the recovery
+route cannot be used to get around it.
 
 After five wrong PINs an account locks for fifteen minutes. This is
 deliberate: a 4-digit PIN is short, and the lock is what stops somebody

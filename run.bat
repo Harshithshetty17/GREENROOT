@@ -25,7 +25,7 @@ if errorlevel 1 (
     !PYTHON! --version >nul 2>&1
     if errorlevel 1 (
         echo [ERROR] Python was not found on your PATH.
-        echo         Install Python 3.10 or newer from https://python.org
+        echo         Install Python 3.12 or newer from https://python.org
         echo         and tick "Add Python to PATH" during setup.
         echo.
         pause

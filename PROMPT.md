@@ -242,10 +242,27 @@ any app to have — built for this audience, not copied from a SaaS dashboard.
 
 8. PYTHON FLOOR IS 3.12. shap has no cp313 wheel. Do not claim 3.13 works.
 
+9. A KEYED st.selectbox STORES THE LABEL ITS format_func PRODUCED, and restores
+   the widget by looking that label back up among the formatted options. Change
+   what format_func returns -- translating the options, say -- and the stored
+   label no longer matches anything, so Streamlit hands back the raw label
+   string instead of the option. st.session_state["season"] then holds
+   "Rabi (winter)" where every reader expects "rabi", and the next
+   SEASONS[...] takes the whole page down. If a format_func can ever change,
+   map the key's value back onto a valid option before the widget is built --
+   after it, assigning to a widget key is itself an error. See
+   seasons.canonical().
+
+10. A TRANSLATED STRING NOTHING READS is worse than a missing one: it reads as
+   covered, it costs a reviewer time, and the screen it was written for is
+   still in English. Eight keys had drifted into that state. tests/test_i18n.py
+   parses app.py for the keys it actually asks for and fails in both
+   directions.
+
 ================================================================================
 8. VERIFICATION STANDARD — A CHANGE IS NOT DONE UNTIL ALL OF THESE PASS
 ================================================================================
-1. pytest -q is green. (523 passed, 1 environment-conditional skip at time of
+1. pytest -q is green. (958 passed, 1 environment-conditional skip at time of
    writing.)
 
 2. You have driven the real app in a browser at 390x844 AND 1440x900, taken

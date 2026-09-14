@@ -268,3 +268,46 @@ class TestCosting:
     def test_bags_per_acre_is_reported(self) -> None:
         estimate = estimate_cost({"Urea": 100.0}, {"Urea": 10.0})
         assert estimate.lines[0].bags_per_acre == pytest.approx(0.809, abs=0.01)
+
+
+class TestCanonical:
+    """Streamlit restores a selectbox by looking up the label it stored, so a
+    language switch can leave the season key holding a formatted label. Every
+    reader downstream indexes by key, and an unguarded ``SEASONS[label]``
+    takes the whole page down with a KeyError."""
+
+    @pytest.mark.parametrize("given,expected", [
+        ("rabi", "rabi"),
+        ("KHARIF", "kharif"),
+        (" summer ", "summer"),
+        ("Rabi (winter)", "rabi"),          # the English label Streamlit stores
+        ("Rabi", "rabi"),                   # ...and the same without the gloss
+        ("Summer (zaid)", "summer"),
+        ("Perennial / plantation", "perennial"),
+        ("ಮುಂಗಾರು", "kharif"),               # the Kannada label
+        ("ಹಿಂಗಾರು", "rabi"),
+        ("ಬಹುವಾರ್ಷಿಕ", "perennial"),
+    ])
+    def test_every_form_the_widget_can_hold_maps_back(self, given, expected):
+        assert season_lib.canonical(given) == expected
+
+    @pytest.mark.parametrize("junk", [None, "", "monsoon-ish", 7, object()])
+    def test_anything_unrecognised_falls_back_rather_than_raising(self, junk):
+        assert season_lib.canonical(junk) == season_lib.KHARIF
+
+    def test_the_fallback_is_choosable(self):
+        assert season_lib.canonical("junk", fallback=season_lib.RABI) == season_lib.RABI
+
+    def test_the_result_always_indexes_seasons(self):
+        """The point of the function: its output is safe to subscript."""
+        for given in ("rabi", "Rabi (winter)", "ಹಿಂಗಾರು", None, "junk"):
+            assert season_lib.SEASONS[season_lib.canonical(given)]
+
+    def test_every_label_the_picker_can_show_round_trips(self):
+        """Both languages, generated rather than hand-listed, so a season
+        added later cannot quietly skip this."""
+        from src.utils.i18n import ENGLISH, KANNADA, season_name
+
+        for key, (english, _) in season_lib.SEASONS.items():
+            for language in (ENGLISH, KANNADA):
+                assert season_lib.canonical(season_name(key, english, language)) == key

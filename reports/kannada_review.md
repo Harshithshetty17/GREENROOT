@@ -5,8 +5,10 @@ Please read each Kannada line against its English and mark anything that is wron
 This is agronomic advice people act on in a field, so a wrong word has a real cost. The English is the source of truth; the Kannada was written by someone who does not speak the language.
 
 - Interface strings translated: **45 of 55**
-- Extra strings: **26**
+- Extra strings: **30**
 - Crop names: **22**, of which **16** are already corroborated against the government soil survey shipped with the project (marked ✅ below — these need the least attention)
+
+**If you only have time for one section, read _Field instructions_.** Those are the lines a farmer acts on with a bag of fertiliser in hand; everything else is navigation, and a clumsy button is recoverable in a way a wrong dose is not.
 
 
 ## Interface
@@ -77,15 +79,19 @@ This is agronomic advice people act on in a field, so a wrong word has a real co
 |  | _(no English equivalent)_ | ಮಂಡಿ ದರ | |
 |  | _(no English equivalent)_ | ಉಳಿಯುವ ಹಣ | |
 |  | _(no English equivalent)_ | ಸ್ಪಷ್ಟ ಉತ್ತರ ಅಲ್ಲ — ಎಚ್ಚರಿಕೆಯಿಂದ ಓದಿ | |
-|  | _(no English equivalent)_ | ೧೦೦ ರಲ್ಲಿ | |
+|  | _(no English equivalent)_ | ಈ ದಿನಾಂಕಗಳು ನೀವು ಸಲಹೆ ಉಳಿಸಿದ ದಿನದಿಂದ ಲೆಕ್ಕ ಹಾಕಿದವು, ನೀವು ನಿಜವಾಗಿ ಬಿತ್ತಿದ ದಿನದಿಂದ ಅಲ್ಲ — ಹಾಗಾಗಿ ಇವು ಸರಿಸುಮಾರು, ನಿಖರವಲ್ಲ. | |
 |  | _(no English equivalent)_ | 🗂️ ಉಳಿಸಿದವು ಮತ್ತು ಕಾರ್ಡ್ | |
 |  | _(no English equivalent)_ | ಈ ಕಾಲದ ನಿಮ್ಮ ಯೋಜನೆ | |
+|  | _(no English equivalent)_ | ಅಥವಾ ಪಠ್ಯವನ್ನು ನಕಲಿಸಿ | |
+|  | _(no English equivalent)_ | ಈ ಸಲಹೆಯನ್ನು ಹಂಚಿಕೊಳ್ಳಿ | |
+|  | _(no English equivalent)_ | 📤 ವಾಟ್ಸಾಪ್‌ನಲ್ಲಿ ಕಳುಹಿಸಿ | |
 |  | _(no English equivalent)_ | ಒಳಗೆ ಬನ್ನಿ | |
 |  | _(no English equivalent)_ | ಇವು ನಿಮ್ಮ ಜಮೀನಿನ ಅಳತೆಗಳು. ತಪ್ಪಿದ್ದರೆ ಮೇಲೆ ಜಿಲ್ಲೆ ಬದಲಿಸಿ, ನಂತರ ಹಸಿರು ಗುಂಡಿ ಒತ್ತಿ. | |
 |  | _(no English equivalent)_ | ಸಾಮಾನ್ಯ ಹವಾಮಾನ | |
 |  | _(no English equivalent)_ | ಈಗಿನ ಹವಾಮಾನ ಬಳಸಿ | |
 |  | _(no English equivalent)_ | ಇದರಿಂದ ಎಷ್ಟು ಸಿಗಬಹುದು | |
 |  | _(no English equivalent)_ | ಅಂಗಡಿಯಿಂದ ಏನು ತರಬೇಕು | |
+|  | _(no English equivalent)_ | ಮುಂದೆ ಏನು ಮಾಡಬೇಕು | |
 |  | _(no English equivalent)_ | ಯಾವಾಗ ಬಿತ್ತುತ್ತೀರಿ? | |
 |  | _(no English equivalent)_ | 🌱 ನಿಮ್ಮ ಸಲಹೆ | |
 |  | _(no English equivalent)_ | ನಿಮ್ಮ ಜಿಲ್ಲೆ | |
@@ -102,6 +108,50 @@ This is agronomic advice people act on in a field, so a wrong word has a real co
 |  | _(no English equivalent)_ | ಈ ಬೆಳೆ ಆಗಬಹುದು, ಆದರೆ ಮುಂದಿನವೂ ಹತ್ತಿರವಿವೆ. ನಿರ್ಧರಿಸುವ ಮೊದಲು ಹೋಲಿಸಿ ನೋಡಿ. | |
 |  | Weak match | ದುರ್ಬಲ ಹೊಂದಾಣಿಕೆ | |
 |  | _(no English equivalent)_ | ಯಾವ ಬೆಳೆಯೂ ನಿಮ್ಮ ಅಳತೆಗಳಿಗೆ ಸ್ಪಷ್ಟವಾಗಿ ಹೊಂದುವುದಿಲ್ಲ. ಬಿತ್ತನೆಗೆ ಮೊದಲು ಸರ್ಕಾರಿ ಪ್ರಯೋಗಾಲಯದಲ್ಲಿ ಮಣ್ಣು ಪರೀಕ್ಷೆ ಮಾಡಿಸಿ. | |
+
+## Field instructions
+
+| | English | Kannada | Correction |
+|---|---|---|---|
+|  | Plough, apply the full DAP and potash with one third of the urea as the basal dose, then sow. | ಉಳುಮೆ ಮಾಡಿ. ಪೂರ್ತಿ ಡಿಎಪಿ ಮತ್ತು ಪೊಟ್ಯಾಷ್ ಜೊತೆಗೆ ಯೂರಿಯಾದ ಮೂರರಲ್ಲಿ ಒಂದು ಭಾಗವನ್ನು ಬುಡಗೊಬ್ಬರವಾಗಿ ಹಾಕಿ, ನಂತರ ಬಿತ್ತಿ. | |
+|  | First top dressing: one third of the urea. Weed now, before the crop closes over. | ಮೊದಲ ಮೇಲುಗೊಬ್ಬರ: ಯೂರಿಯಾದ ಮೂರರಲ್ಲಿ ಒಂದು ಭಾಗ. ಬೆಳೆ ಮುಚ್ಚಿಕೊಳ್ಳುವ ಮೊದಲೇ ಕಳೆ ತೆಗೆಯಿರಿ. | |
+|  | Last third of the urea. This is when water matters most — do not let the crop dry out. | ಯೂರಿಯಾದ ಕೊನೆಯ ಮೂರನೇ ಒಂದು ಭಾಗ. ಈ ಹಂತದಲ್ಲಿ ನೀರು ಅತಿ ಮುಖ್ಯ — ಬೆಳೆ ಒಣಗಲು ಬಿಡಬೇಡಿ. | |
+|  | Ready around day 135. Stop spraying at least two weeks before you cut. | ಸುಮಾರು 135 ದಿನಕ್ಕೆ ಕೊಯ್ಲಿಗೆ ಸಿದ್ಧ. ಕೊಯ್ಲಿಗೆ ಕನಿಷ್ಠ ಎರಡು ವಾರ ಮೊದಲು ಸಿಂಪಡಣೆ ನಿಲ್ಲಿಸಿ. | |
+|  | Clear the basin, apply compost and the basal dose. | ಪಾತಿ ಸ್ವಚ್ಛ ಮಾಡಿ, ಕೊಟ್ಟಿಗೆ ಗೊಬ್ಬರ ಮತ್ತು ಬುಡಗೊಬ್ಬರ ಹಾಕಿ. | |
+|  | First top dressing after the rains establish. | ಮಳೆ ಸ್ಥಿರವಾದ ನಂತರ ಮೊದಲ ಮೇಲುಗೊಬ್ಬರ ಹಾಕಿ. | |
+|  | Second dressing before the fruiting flush; watch for pests weekly. | ಫಸಲು ಬರುವ ಮೊದಲು ಎರಡನೇ ಗೊಬ್ಬರ ಹಾಕಿ; ವಾರಕ್ಕೊಮ್ಮೆ ಕೀಟ ಬಾಧೆ ನೋಡಿ. | |
+|  | Pick in rounds as the fruit matures, not all at once. | ಹಣ್ಣು ಪಕ್ವವಾದಂತೆ ಸುತ್ತುಸುತ್ತಾಗಿ ಕೊಯ್ಯಿರಿ, ಎಲ್ಲವನ್ನೂ ಒಟ್ಟಿಗೆ ಅಲ್ಲ. | |
+
+## Field stages
+
+| | English | Kannada | Correction |
+|---|---|---|---|
+|  | Prepare and sow | ಸಿದ್ಧತೆ ಮತ್ತು ಬಿತ್ತನೆ | |
+|  | Early growth | ಆರಂಭಿಕ ಬೆಳವಣಿಗೆ | |
+|  | Flowering | ಹೂ ಬಿಡುವ ಹಂತ | |
+|  | Harvest | ಕೊಯ್ಲು | |
+|  | Prepare | ಸಿದ್ಧತೆ | |
+|  | Growing season | ಬೆಳವಣಿಗೆಯ ಕಾಲ | |
+|  | Bearing | ಫಸಲು ಬಿಡುವ ಹಂತ | |
+|  | Harvest cycle | ಕೊಯ್ಲಿನ ಸುತ್ತು | |
+
+## Timing
+
+| | English | Kannada | Correction |
+|---|---|---|---|
+|  | future many | ಸುಮಾರು {days} ದಿನಗಳಲ್ಲಿ | |
+|  | future one | ಸುಮಾರು {days} ದಿನದಲ್ಲಿ | |
+|  | past many | ಸುಮಾರು {days} ದಿನಗಳ ಹಿಂದೆ | |
+|  | past one | ಸುಮಾರು {days} ದಿನದ ಹಿಂದೆ | |
+|  | today | ಇಂದು | |
+
+## Sentences
+
+| | English | Kannada | Correction |
+|---|---|---|---|
+|  | _(no English equivalent)_ | {district} ಜಿಲ್ಲೆಯ {count} ಮಣ್ಣು ಪರೀಕ್ಷೆಗಳ ಸರಾಸರಿ ಅಳತೆ ಇದು. | |
+|  | _(no English equivalent)_ | {district} ಜಿಲ್ಲೆಯ ಸಾಮಾನ್ಯ ಮಣ್ಣು — ಇದು ಸಮೀಕ್ಷೆಯಿಂದ ಬಂದದ್ದಲ್ಲ. ನಿಮ್ಮ ಬಳಿ ಮಣ್ಣು ಆರೋಗ್ಯ ಕಾರ್ಡ್ ಇದ್ದರೆ ಕೆಳಗೆ ಸರಿಪಡಿಸಿ. | |
+|  | _(no English equivalent)_ | {district} ಜಿಲ್ಲೆಯ ಸಾಮಾನ್ಯ ಹವಾಮಾನ | |
 
 ## Warning
 

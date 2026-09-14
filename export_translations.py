@@ -28,12 +28,12 @@ import csv
 import io
 import sys
 from pathlib import Path
-from typing import List, NamedTuple
+from typing import List, NamedTuple, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from src.utils import i18n  # noqa: E402
-from src.utils.agronomy import CROPS, SURVEY_CORROBORATED  # noqa: E402
+from src.utils.agronomy import CROPS, SURVEY_CORROBORATED, roadmap  # noqa: E402
 from src.utils.plain_language import COPY  # noqa: E402
 
 
@@ -48,6 +48,26 @@ class Row(NamedTuple):
     where: str
     #: True when something other than the author's judgement backs it.
     evidenced: bool = False
+
+
+def _english_action(stage_name: str) -> Tuple[str, int]:
+    """The English an action was translated from, and the day it falls on.
+
+    Read back out of :func:`~src.utils.agronomy.roadmap` rather than copied,
+    so the sheet cannot show a reviewer an English line the app no longer
+    says. ``rice`` covers the annual stages and ``coconut`` the perennial
+    ones; between them they produce all eight.
+
+    The day comes back too because the harvest line interpolates it. Filling
+    the Kannada with the same number the English shows means a reviewer
+    compares two finished sentences rather than a sentence against a
+    ``{days}`` placeholder.
+    """
+    for crop in ("rice", "coconut"):
+        for stage in roadmap(crop):
+            if stage.name == stage_name:
+                return stage.action, stage.day
+    return "", 0
 
 
 def collect() -> List[Row]:
@@ -68,6 +88,28 @@ def collect() -> List[Row]:
                         "beside the crop name -- the headline judgement"))
         rows.append(Row("Confidence", f"band-detail:{english}", "", detail_kn,
                         "the sentence under the crop card"))
+
+    # Field instructions first among the untranslated-by-evidence groups:
+    # these are the lines somebody acts on with a bag of urea in their hand,
+    # so they are the ones worth the reviewer's freshest attention.
+    for stage_name in i18n.KANNADA_STAGE_ACTIONS:
+        english, day = _english_action(stage_name)
+        _, kannada = i18n.stage_words(stage_name, english, i18n.KANNADA, day=day)
+        rows.append(Row(
+            "Field instructions", f"action:{stage_name}", english, kannada,
+            "the What-to-do-next panel and the season plan"))
+
+    for english, kannada in i18n.KANNADA_STAGES.items():
+        rows.append(Row("Field stages", f"stage:{english}", english, kannada,
+                        "the heading of each reminder"))
+
+    for key, kannada in sorted(i18n.KANNADA_WHEN.items()):
+        rows.append(Row("Timing", f"when:{key}", key.replace("_", " "), kannada,
+                        "beside each reminder -- how soon it falls"))
+
+    for key, kannada in sorted(i18n.KANNADA_PHRASES.items()):
+        rows.append(Row("Sentences", key, "", kannada,
+                        "under the soil card and the weather box"))
 
     rows.append(Row("Warning", "review_status", i18n.REVIEW_STATUS,
                     i18n.REVIEW_STATUS_KN,
@@ -104,6 +146,12 @@ def as_markdown(rows: List[Row]) -> str:
         f"**{len(SURVEY_CORROBORATED)}** are already corroborated against the "
         f"government soil survey shipped with the project (marked ✅ below — "
         f"these need the least attention)\n\n"
+    )
+    out.write(
+        "**If you only have time for one section, read _Field instructions_.** "
+        "Those are the lines a farmer acts on with a bag of fertiliser in "
+        "hand; everything else is navigation, and a clumsy button is "
+        "recoverable in a way a wrong dose is not.\n\n"
     )
 
     for group in dict.fromkeys(r.group for r in rows):

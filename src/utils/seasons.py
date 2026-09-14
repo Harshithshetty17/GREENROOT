@@ -224,6 +224,37 @@ def assess(crop: str, season: str) -> SeasonFit:
     )
 
 
+def canonical(value: object, *, fallback: str = KHARIF) -> str:
+    """Map anything that names a season back onto its key.
+
+    Streamlit stores a ``selectbox``'s value as the string its ``format_func``
+    produced, and restores it by looking that string back up among the
+    formatted options. Change the interface language and the lookup misses --
+    the stored label was formatted under the old language -- at which point
+    Streamlit hands back the raw label instead of the option, and
+    ``st.session_state["season"]`` holds ``"Rabi (winter)"`` or ``ಹಿಂಗಾರು``
+    where every reader downstream expects ``"rabi"``.
+
+    So a label is accepted here as well as a key: the English name with or
+    without its parenthetical gloss, the Kannada name, or the key in any
+    case. Anything unrecognised falls back rather than raising, because the
+    caller is usually about to index :data:`SEASONS` with the result and a
+    ``KeyError`` there takes the whole page down.
+    """
+    from src.utils.i18n import KANNADA, season_name
+
+    if isinstance(value, str):
+        text = value.strip()
+        lowered = text.lower()
+        if lowered in SEASONS:
+            return lowered
+        for key, (english, _) in SEASONS.items():
+            if text in (english, english.split(" (")[0],
+                        season_name(key, english, KANNADA)):
+                return key
+    return fallback
+
+
 def default_season(month: int) -> str:
     """Suggest the season whose sowing window contains ``month``.
 
@@ -255,5 +286,5 @@ __all__ = [
     "KHARIF", "RABI", "SUMMER", "PERENNIAL",
     "SEASONS", "CROP_SEASONS", "SeasonFit",
     "assess", "seasons_for", "is_perennial",
-    "default_season", "filter_sowable", "coverage",
+    "canonical", "default_season", "filter_sowable", "coverage",
 ]

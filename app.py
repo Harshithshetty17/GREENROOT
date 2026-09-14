@@ -167,6 +167,15 @@ _CSS = """
   .gr-hero-reads { margin-top: 7px; font-size: 12.5px; opacity: .80;
                    letter-spacing: .2px; }
 
+  /* A weak match must read as weak here too, or the banner contradicts the
+     card directly beneath it. */
+  .gr-hero-unsure {
+    background:
+      radial-gradient(120% 140% at 88% -20%, rgba(255,255,255,.14) 0%,
+                      rgba(255,255,255,0) 58%),
+      linear-gradient(135deg, #7a5c12 0%, #97731c 45%, #b8912e 100%);
+  }
+
   /* Empty-state guidance: on-brand, and it says something worth reading
      instead of a stock blue notice restating the button label. */
   .gr-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
@@ -206,6 +215,19 @@ _CSS = """
   .gr-primary .kn { font-size: 20px; font-weight: 600; color: #1f7a4d;
                     line-height: 1.3; margin: 0 0 6px; }
   .gr-primary .conf { font-size: 14.5px; color: #3d5548; font-weight: 500; }
+
+  /* Below 60/100 the card drops its confident green: an uncertain answer
+     should not look like a certain one. */
+  .gr-primary.unsure {
+    background: linear-gradient(160deg, #fdf9f0 0%, #fbf4e6 100%);
+    border-color: #e8d6ac;
+  }
+  .gr-primary.unsure .crop { color: #8a6a1f; }
+  .gr-primary.unsure .kn   { color: #8a6a1f; }
+  .gr-primary .warnline {
+    font-size: 12.5px; font-weight: 700; letter-spacing: .3px;
+    text-transform: uppercase; color: #a6382a; margin-bottom: 8px;
+  }
 
   /* Top control bar: the only things most people ever touch. */
   .gr-controls { margin-bottom: 2px; }
@@ -484,88 +506,100 @@ def render_controls() -> Dict[str, object]:
         )
         _apply_district(st.session_state["district_pick"])
 
-    st.markdown('<div class="gr-controls">', unsafe_allow_html=True)
-    bar = st.columns([1.3, 0.9, 1.1, 1.2], gap="medium")
-
-    district = bar[0].selectbox(
-        "Your district" if simple else "District",
-        options=districts,
-        key="district_pick",
-        on_change=_on_district_change,
-        help=(
-            "Picking your district fills in the typical soil and weather for "
-            "that area."
-            if simple
-            else "Loads the NFSM survey median where one exists, otherwise "
-            "the curated agro-climatic baseline, plus regional climate "
-            "normals."
-        ),
+    # On a phone these four controls stack, and a farmer scrolls past two
+    # full screens of dropdowns before seeing a single word of advice. They
+    # are set once and rarely changed, so they collapse behind a one-line
+    # summary of what they currently say.
+    current = st.session_state.get("district_pick", "")
+    acres_now = float(st.session_state.get("acres", 1.0))
+    season_now = season_lib.SEASONS[
+        st.session_state.get("season", season_lib.KHARIF)
+    ][0]
+    summary = (
+        f"📍 {current}  ·  {acres_now:g} acre"
+        + ("" if acres_now == 1 else "s")
+        + f"  ·  {season_now}"
     )
+    with st.expander(summary, expanded=False):
+        bar = st.columns([1.3, 0.9, 1.1, 1.2], gap="medium")
 
-    acres = bar[1].number_input(
-        "How many acres?" if simple else "Area (acres)",
-        min_value=0.1,
-        max_value=1000.0,
-        value=float(st.session_state.get("acres", 1.0)),
-        step=0.5,
-        key="acres",
-        help="Fertiliser bags and the money estimate are worked out for this "
-             "area.",
-    )
+        district = bar[0].selectbox(
+            "Your district" if simple else "District",
+            options=districts,
+            key="district_pick",
+            on_change=_on_district_change,
+            help=(
+                "Picking your district fills in the typical soil and weather for "
+                "that area."
+                if simple
+                else "Loads the NFSM survey median where one exists, otherwise "
+                "the curated agro-climatic baseline, plus regional climate "
+                "normals."
+            ),
+        )
 
-    season_keys = list(season_lib.SEASONS)
-    if "season" not in st.session_state:
-        st.session_state["season"] = season_lib.default_season(date.today().month)
-    bar[2].selectbox(
-        "When will you sow?" if simple else "Cropping season",
-        options=season_keys,
-        format_func=lambda key: season_lib.SEASONS[key][0],
-        key="season",
-        help=(
-            "A crop can suit your soil and still be wrong for the time of "
-            "year. We check both."
-            if simple
-            else "Sowing window; used to flag calendar mismatches the edaphic "
-            "model cannot see."
-        ),
-    )
+        acres = bar[1].number_input(
+            "How many acres?" if simple else "Area (acres)",
+            min_value=0.1,
+            max_value=1000.0,
+            value=float(st.session_state.get("acres", 1.0)),
+            step=0.5,
+            key="acres",
+            help="Fertiliser bags and the money estimate are worked out for this "
+                 "area.",
+        )
 
-    with bar[3]:
-        weather = st.session_state.get("weather")
-        climate = st.session_state.get("climate")
-        if weather is not None and weather.is_live:
-            st.markdown(
-                f"<div class='gr-wx live'><div class='k'>LIVE WEATHER</div>"
-                f"<div class='v'>{weather.temperature:.0f}°C · "
-                f"{weather.humidity:.0f}% RH</div>"
-                f"<div class='s'>{weather.city}</div></div>",
-                unsafe_allow_html=True,
-            )
-        else:
-            where = getattr(climate, "district", district)
-            st.markdown(
-                f"<div class='gr-wx'><div class='k'>TYPICAL WEATHER</div>"
-                f"<div class='v'>{st.session_state['in_temperature']:.0f}°C · "
-                f"{st.session_state['in_humidity']:.0f}% RH</div>"
-                f"<div class='s'>normals for {where}</div></div>",
-                unsafe_allow_html=True,
-            )
-        if st.button(
-            "Use live weather" if simple else "Fetch live telemetry",
-            width="stretch",
-            key="fetch_wx",
-        ):
-            reading = get_weather(district, st.session_state.get("wx_key") or None)
-            st.session_state["weather"] = reading
-            for key, value in reading.as_dict().items():
-                st.session_state[f"in_{key}"] = float(
-                    np.clip(value, *FEATURE_BOUNDS[key])
+        season_keys = list(season_lib.SEASONS)
+        if "season" not in st.session_state:
+            st.session_state["season"] = season_lib.default_season(date.today().month)
+        bar[2].selectbox(
+            "When will you sow?" if simple else "Cropping season",
+            options=season_keys,
+            format_func=lambda key: season_lib.SEASONS[key][0],
+            key="season",
+            help=(
+                "A crop can suit your soil and still be wrong for the time of "
+                "year. We check both."
+                if simple
+                else "Sowing window; used to flag calendar mismatches the edaphic "
+                "model cannot see."
+            ),
+        )
+
+        with bar[3]:
+            weather = st.session_state.get("weather")
+            climate = st.session_state.get("climate")
+            if weather is not None and weather.is_live:
+                st.markdown(
+                    f"<div class='gr-wx live'><div class='k'>LIVE WEATHER</div>"
+                    f"<div class='v'>{weather.temperature:.0f}°C · "
+                    f"{weather.humidity:.0f}% RH</div>"
+                    f"<div class='s'>{weather.city}</div></div>",
+                    unsafe_allow_html=True,
                 )
-            if not reading.is_live:
-                st.toast("No live reading — kept the typical weather.")
-            st.rerun()
-
-    st.markdown("</div>", unsafe_allow_html=True)
+            else:
+                where = getattr(climate, "district", district)
+                st.markdown(
+                    f"<div class='gr-wx'><div class='k'>TYPICAL WEATHER</div>"
+                    f"<div class='v'>{st.session_state['in_temperature']:.0f}°C · "
+                    f"{st.session_state['in_humidity']:.0f}% RH</div>"
+                    f"<div class='s'>normals for {where}</div></div>",
+                    unsafe_allow_html=True,
+                )
+            if st.button(
+                "Use live weather" if simple else "Fetch live telemetry",
+                width="stretch",
+                key="fetch_wx",
+            ):
+                reading = get_weather(district, st.session_state.get("wx_key") or None)
+                st.session_state["weather"] = reading
+                for key, value in reading.as_dict().items():
+                    st.session_state[f"in_{key}"] = float(
+                        np.clip(value, *FEATURE_BOUNDS[key])
+                    )
+                if not reading.is_live:
+                    st.toast("No live reading — kept the typical weather.")
+                st.rerun()
 
     # ---- Manual soil card adjustments, folded away --------------------- #
     baseline = st.session_state.get("baseline")
@@ -586,7 +620,7 @@ def render_controls() -> Dict[str, object]:
 
     values: Dict[str, float] = {}
     with st.expander(
-        "Change my soil card readings" if simple else "Manual feature override",
+        "Change my soil readings" if simple else "Manual feature override",
         expanded=False,
     ):
         if baseline is not None:
@@ -873,13 +907,24 @@ def render_recommendation_tab(state: Dict[str, object]) -> None:
             if simple
             else f"{prediction.confidence:.2f}% posterior probability"
         )
+        # A weak match must not be dressed as a strong one. The card loses its
+        # confident green below 60/100 and says so above the crop name, so a
+        # farmer skimming on a phone cannot mistake a coin-flip for an answer.
+        tone = "" if prediction.confidence >= 60 else " unsure"
+        caveat = (
+            ""
+            if prediction.confidence >= 60
+            else f"<div class='warnline'>{'Not a clear answer' if simple else 'Low posterior'}"
+            f" — {'read this with care' if simple else 'treat as indicative'}</div>"
+        )
         st.markdown(
-            f"""<div class="gr-primary">
-                  <div class="gr-sub">{tr('primary_label', simple)}</div>
-                  <div class="crop">{prediction.crop}</div>
-                  <div class="kn">{agronomy.kannada_name(prediction.crop)}</div>
-                  <div class="conf">{headline} · {district}</div>
-                </div>""",
+            f'<div class="gr-primary{tone}">'
+            f"{caveat}"
+            f'<div class="gr-sub">{tr("primary_label", simple)}</div>'
+            f'<div class="crop">{prediction.crop}</div>'
+            f'<div class="kn">{agronomy.kannada_name(prediction.crop)}</div>'
+            f'<div class="conf">{headline} · {district}</div>'
+            "</div>",
             unsafe_allow_html=True,
         )
         if simple:
@@ -2094,8 +2139,9 @@ def main() -> None:
         )
         # Collapsed: at full height this banner repeats on all six tabs and,
         # on a phone, pushes every tab's content below the fold.
+        hero_tone = "" if answered.confidence >= 60 else " gr-hero-unsure"
         hero_slot.markdown(
-            f"""<div class="gr-hero gr-hero-compact">
+            f"""<div class="gr-hero gr-hero-compact{hero_tone}">
                   <div class="gr-hero-top">
                     <h1>🌱 GREENROOT</h1>
                     <span class="gr-hero-place">{inputs['district']}</span>
@@ -2127,30 +2173,21 @@ def main() -> None:
     # reachable in both -- the toggle changes the order and the wording, not
     # what the system is willing to show.
     if simple:
-        tabs = st.tabs(
-            [
-                "🌱 Your Crop",
-                "💰 Cost & Profit",
-                "💡 Why This Crop?",
-                "🧾 Your Soil Card",
-                "🗂️ Past Records",
-            ]
-        )
+        # Two tabs, not five. A farmer wants one answer -- which crop, what
+        # to buy, when to do it -- and splitting that across three screens
+        # made them hunt for the half they needed. The explainer-consensus
+        # screen is gone from this view entirely: Jaccard agreement between
+        # TreeSHAP and LIME is an examiner's question, not a farmer's. It is
+        # still computed, and still one toggle away in Examiner mode.
+        tabs = st.tabs(["🌱 Your Advice", "🗂️ Saved & Card"])
         with tabs[0]:
             render_recommendation_tab(state)
-        with tabs[1]:
-            if state.get("prediction") is None:
-                st.info(
-                    "Press the green button first — then this shows what the "
-                    "crop could earn and what to buy."
-                )
-            else:
+            if state.get("prediction") is not None:
+                st.markdown("---")
                 render_commercial_panel(state, simple)
-        with tabs[2]:
-            render_xai_tab(state)
-        with tabs[3]:
+        with tabs[1]:
             render_card_tab(state)
-        with tabs[4]:
+            st.markdown("---")
             render_audit_tab()
     else:
         tabs = st.tabs(

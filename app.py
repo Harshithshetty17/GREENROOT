@@ -15,6 +15,7 @@ import base64
 import dataclasses
 import io
 import logging
+from urllib.parse import quote
 from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional
 
@@ -28,6 +29,7 @@ import pandas as pd
 import streamlit as st
 
 from src.core.config import (
+    APP_VERSION,
     CONSENSUS_TOP_K,
     DEFAULT_INPUTS,
     FEATURE_BOUNDS,
@@ -67,7 +69,7 @@ from src.utils.agronomy_advisory import CRITICAL, INFO, WARNING, generate_adviso
 from src.utils.economics import estimate_cost, price_per_kg_from_bag
 from src.utils.intervention import simulate_advisory
 from src.utils import seasons as season_lib
-from src.utils import i18n
+from src.utils import i18n, reminders
 from src.utils.plain_language import (
     category_name,
     confidence_band,
@@ -618,6 +620,27 @@ def _sign_out() -> None:
         st.session_state.pop(key, None)
 
 
+def render_help_sidebar() -> None:
+    """What this is, and the disclaimer. Shown to everyone.
+
+    This used to sit inside the signed-in branch, which meant a guest -- a
+    first-time visitor, the person most likely to want it -- could not reach
+    it at all.
+    """
+    with st.sidebar.expander("Help & about", expanded=False):
+        st.markdown(
+            "**What is this?** GREENROOT suggests a crop for your land from "
+            "seven soil and weather readings, and shows how it decided.\n\n"
+            "**Is it a promise?** No. It is advice to help you decide. Check "
+            "with your local agriculture officer before sowing.\n\n"
+            "**Do I need an account?** No. Everything works without one."
+        )
+        st.caption(
+            f"GREENROOT v{APP_VERSION} · 22 crops · "
+            f"advisory output only"
+        )
+
+
 def render_account_sidebar(simple: bool) -> None:
     """Sign in, profile and settings -- all of it in the sidebar.
 
@@ -843,15 +866,6 @@ def render_account_sidebar(simple: bool) -> None:
                 _sign_out()
                 st.rerun()
 
-    with st.sidebar.expander("Help & about", expanded=False):
-        st.markdown(
-            "**What is this?** GREENROOT suggests a crop for your land from "
-            "seven soil and weather readings, and shows how it decided.\n\n"
-            "**Is it a promise?** No. It is advice to help you decide. Check "
-            "with your local agriculture officer before sowing.\n\n"
-            "**Do I need an account?** No. Everything works without one."
-        )
-        st.caption("GREENROOT · 22 crops · advisory output only")
 
 
 def render_controls() -> Dict[str, object]:
@@ -1100,6 +1114,55 @@ def _rupees(amount: float) -> str:
     return f"{'-' if negative else ''}₹{digits}"
 
 
+def render_reminders(simple: bool) -> None:
+    """What is due on advice already saved.
+
+    The buildable half of a notification. Push needs a scheduler this
+    deployment does not have, but the value -- "your crop is 34 days old,
+    time for the first top dressing" -- is arithmetic over the saved date and
+    the crop roadmap, so it is computed here and shown when the farmer next
+    opens the app.
+    """
+    if not ensure_database():
+        return
+    viewer = current_user()
+    try:
+        frame = db_manager.fetch_audit_history(
+            limit=40,
+            **({"user_id": viewer.id} if viewer else {"guest_only": True}),
+        )
+    except Exception as exc:  # noqa: BLE001 - a reminder is never worth a crash.
+        logging.warning("Could not read records for reminders: %s", exc)
+        return
+    if frame.empty:
+        return
+
+    due = reminders.upcoming(frame.to_dict("records"))
+    if not due:
+        return
+
+    st.markdown(
+        f"#### {t_extra('whats_due', 'What to do next') if simple else 'Field calendar'}"
+    )
+    for item in due:
+        body = (
+            f"**{item.headline()}** — {item.when_words()}"
+            f"{('  ·  ' + item.district) if item.district else ''}  \n"
+            f"{item.action}"
+        )
+        {"overdue": st.error, "now": st.warning}.get(item.urgency, st.info)(body)
+
+    st.caption(
+        t_extra(
+            "reminder_estimate",
+            "These dates are worked out from the day you saved the advice, "
+            "not the day you actually sowed — so treat them as close, not "
+            "exact.",
+        )
+    )
+    st.markdown("---")
+
+
 def render_commercial_panel(state: Dict[str, object], simple: bool) -> None:
     """What the crop is worth, what to buy, and when to do it.
 
@@ -1263,6 +1326,48 @@ def render_commercial_panel(state: Dict[str, object], simple: bool) -> None:
             f"<p><b>{stage.when}</b><br>{stage.action}</p></div>",
             unsafe_allow_html=True,
         )
+
+    _render_share(state, crop_profile, plan, money, simple)
+
+
+def _render_share(state, crop_profile, plan, money, simple: bool) -> None:
+    """Hand the advice to WhatsApp.
+
+    WhatsApp is how this advice actually travels -- to a son in the city, to
+    the dealer, to a neighbour. A wa.me link needs no API key and no app
+    permission, and degrades to a copyable block of text if the link is not
+    tappable on whatever the farmer is using.
+    """
+    prediction = state["prediction"]
+    lines = [
+        "GREENROOT",
+        "",
+        f"Crop: {crop_profile.english} ({agronomy.kannada_name(prediction.crop)})",
+        f"Match: {prediction.confidence:.0f} / 100",
+    ]
+    if state.get("district"):
+        lines.append(f"Place: {state['district']}")
+    if not plan.is_empty:
+        lines.append("")
+        lines.append(f"Fertiliser for {plan.acres:g} acre(s):")
+        lines += [f"  {line.say()}" for line in plan.lines if line.whole_bags]
+    lines += [
+        "",
+        "Advice only, not a promise. Check with your agriculture officer "
+        "before sowing.",
+    ]
+    message = "\n".join(lines)
+
+    st.markdown(f"#### {t_extra('share_heading', 'Share this advice')}")
+    st.link_button(
+        t_extra("share_whatsapp", "📤 Send on WhatsApp"),
+        f"https://wa.me/?text={quote(message)}",
+        width="stretch",
+    )
+    with st.expander(t_extra("share_copy", "Or copy the text")):
+        st.code(message, language=None)
+
+
 
 
 def render_recommendation_tab(state: Dict[str, object]) -> None:
@@ -2420,6 +2525,7 @@ def main() -> None:
     ensure_database()
     _adopt_stored_language()
     render_account_sidebar(is_simple())
+    render_help_sidebar()
     inputs = render_controls()
     simple = is_simple()
 
@@ -2595,6 +2701,7 @@ def main() -> None:
                 st.markdown("---")
                 render_commercial_panel(state, simple)
         with tabs[1]:
+            render_reminders(simple)
             render_card_tab(state)
             st.markdown("---")
             render_audit_tab()

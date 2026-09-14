@@ -104,15 +104,54 @@ _CSS = """
   section[data-testid="stSidebar"] .block-container { padding-top: 1.2rem; }
 
   /* ---- Hero ----------------------------------------------------------- */
+  /* The hero carries the current readings rather than sitting empty: an
+     un-run app otherwise shows a large blank slab above the fold. */
   .gr-hero {
-    background: linear-gradient(135deg, #1b6e45 0%, #2f9e5f 100%);
-    color: #fff; padding: 22px 28px; border-radius: 14px; margin-bottom: 20px;
-    box-shadow: 0 1px 2px rgba(20,40,29,.06), 0 8px 24px rgba(20,40,29,.08);
+    background:
+      radial-gradient(120% 140% at 88% -20%, rgba(255,255,255,.16) 0%,
+                      rgba(255,255,255,0) 58%),
+      linear-gradient(135deg, #115c3c 0%, #1b6e45 42%, #2f9e5f 100%);
+    color: #fff; padding: 20px 26px 18px; border-radius: 16px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 2px rgba(20,40,29,.06), 0 10px 28px rgba(20,40,29,.10);
   }
-  .gr-hero h1 { margin: 0 0 6px; font-size: 27px; font-weight: 700;
-                letter-spacing: -.2px; line-height: 1.15; }
-  .gr-hero p  { margin: 0; opacity: .94; font-size: 14.5px; line-height: 1.5;
-                max-width: 68ch; }
+  .gr-hero h1 { margin: 0; font-size: 25px; font-weight: 700;
+                letter-spacing: .4px; line-height: 1.15; }
+  .gr-hero p  { margin: 3px 0 0; opacity: .90; font-size: 14px;
+                line-height: 1.5; max-width: 72ch; }
+  .gr-hero-top { display: flex; align-items: baseline; gap: 10px;
+                 flex-wrap: wrap; }
+  .gr-hero-place { margin-left: auto; font-size: 13px; font-weight: 600;
+                   letter-spacing: .3px; padding: 4px 12px; border-radius: 999px;
+                   background: rgba(255,255,255,.15); white-space: nowrap; }
+
+  /* Reading strip: one tile per feature, label over value. */
+  .gr-reads { display: grid; gap: 1px; margin-top: 16px;
+              grid-template-columns: repeat(6, 1fr);
+              background: rgba(255,255,255,.16); border-radius: 10px;
+              overflow: hidden; }
+  .gr-read { background: rgba(8,48,30,.22); padding: 9px 10px 10px; }
+  .gr-read .k { font-size: 10.5px; letter-spacing: .7px; text-transform: uppercase;
+                opacity: .78; font-weight: 600; }
+  .gr-read .v { font-size: 19px; font-weight: 700; line-height: 1.2;
+                margin-top: 2px; letter-spacing: -.3px; }
+  .gr-read .v small { font-size: 11.5px; font-weight: 600; opacity: .72;
+                      margin-left: 2px; letter-spacing: 0; }
+
+  /* Empty-state guidance: on-brand, and it says something worth reading
+     instead of a stock blue notice restating the button label. */
+  .gr-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+              margin: 4px 0 2px; }
+  .gr-step { border: 1px solid #dfe8e2; border-radius: 14px; padding: 18px 20px;
+             background: #fff; box-shadow: 0 1px 2px rgba(20,40,29,.04); }
+  .gr-step .n { display: inline-flex; align-items: center; justify-content: center;
+                width: 26px; height: 26px; border-radius: 999px; font-size: 13px;
+                font-weight: 700; background: #e7f2eb; color: #14603c;
+                margin-bottom: 9px; }
+  .gr-step h4 { margin: 0 0 5px !important; padding: 0 !important;
+                font-size: 15px; font-weight: 650; color: #14281d; }
+  .gr-step p { margin: 0 !important; padding: 0 !important; font-size: 13.5px;
+               line-height: 1.55; color: #5c6f63; }
 
   /* ---- Tabs ----------------------------------------------------------- */
   button[data-baseweb="tab"] { font-size: 14.5px; font-weight: 500;
@@ -153,8 +192,9 @@ _CSS = """
                 background: #f4f8f5; border: 1px solid #e0e9e3;
                 border-radius: 10px; padding: 10px 14px; }
   .gr-readout b { color: #14603c; }
-  .gr-readout-hint { font-size: 12.5px; color: #5c6f63;
-                     margin: 5px 0 10px 2px; }
+  /* Sits beside the run button, so align to its optical centre. */
+  .gr-readout-hint { font-size: 13px; color: #5c6f63; line-height: 1.5;
+                     margin: 0; padding-top: 7px; }
 
   /* ---- Advisory items -------------------------------------------------- */
   .gr-advisory {
@@ -187,8 +227,13 @@ _CSS = """
   @media (max-width: 820px) {
     /* The collapsed sidebar is 320px wide translated -300px, so its right
        20px sits over the content area. Inset the content past that rail or
-       the first character of every line is painted over. */
-    .block-container { padding: 1rem 1rem 2.5rem 1.9rem; }
+       the first character of every line is painted over -- and drop the
+       rail's fill, otherwise it reads as a stripe down the left edge and
+       the page looks off-centre. Gutters are then equal on both sides. */
+    .block-container { padding: 1rem 1.9rem 2.5rem 1.9rem; }
+    section[data-testid="stSidebar"][aria-expanded="false"] {
+      background: transparent; border-right: none;
+    }
 
     /* Streamlit columns shrink rather than wrap by default; force a stack. */
     div[data-testid="stHorizontalBlock"] { flex-direction: column; gap: .85rem; }
@@ -196,9 +241,19 @@ _CSS = """
       width: 100% !important; flex: 1 1 100% !important; min-width: 0 !important;
     }
 
-    .gr-hero { padding: 16px 18px; border-radius: 12px; }
+    .gr-hero { padding: 16px 16px 14px; border-radius: 14px; }
     .gr-hero h1 { font-size: 21px; }
-    .gr-hero p  { font-size: 13px; }
+    .gr-hero p  { font-size: 12.5px; }
+    .gr-hero-place { font-size: 12px; padding: 3px 10px; }
+    /* Six tiles across 390px gives 55px each -- too narrow for "190 mm".
+       Three across two rows keeps every value on one line. */
+    .gr-reads { grid-template-columns: repeat(3, 1fr); margin-top: 13px; }
+    .gr-read { padding: 8px 9px 9px; }
+    .gr-read .v { font-size: 17px; }
+    .gr-steps { grid-template-columns: 1fr; gap: 10px; }
+    .gr-step { padding: 14px 16px; }
+    /* Stacked above the button here, not beside it. */
+    .gr-readout-hint { padding-top: 0; margin-bottom: 4px; }
 
     .gr-primary { padding: 18px 18px; }
     .gr-primary .crop { font-size: 30px; }
@@ -225,6 +280,7 @@ _CSS = """
 
   @media (max-width: 420px) {
     .gr-hero h1 { font-size: 19px; }
+    .gr-read .v { font-size: 16px; }
     .gr-primary .crop { font-size: 26px; }
   }
 </style>
@@ -491,19 +547,46 @@ def render_sidebar() -> Dict[str, object]:
 # --------------------------------------------------------------------------- #
 # Tab 1 — Precision Recommendation
 # --------------------------------------------------------------------------- #
+def render_empty_state(simple: bool) -> None:
+    """What the user sees before the first run.
+
+    A stock notice restating the button label wastes the only screen most
+    users will judge the tool on, so this explains what the system actually
+    does — including that it shows its reasoning, which is the point of it.
+    """
+    steps = (
+        [
+            ("Check your readings", "The six numbers above describe your land. "
+             "Tap ☰ at the top to correct any of them."),
+            ("Press the green button", "GREENROOT weighs your soil against "
+             "22 crops and picks the one that fits best."),
+            ("See why, not just what", "It shows which reading decided it, "
+             "what to add to the soil, and whether the season suits."),
+        ]
+        if simple
+        else [
+            ("Set the feature vector", "Seven inputs: N, P, K, pH, temperature, "
+             "humidity and rainfall, bounded and validated on entry."),
+            ("Run the stacking ensemble", "Random Forest, AdaBoost and kNN feed "
+             "a logistic meta-learner over 22 crop classes."),
+            ("Audit the decision", "TreeSHAP and LIME are compared by Jaccard "
+             "overlap at k=3, with Z-score covariate-shift flags."),
+        ]
+    )
+    cards = "".join(
+        f"<div class='gr-step'><div class='n'>{i}</div>"
+        f"<h4>{title}</h4><p>{body}</p></div>"
+        for i, (title, body) in enumerate(steps, start=1)
+    )
+    st.markdown(f"<div class='gr-steps'>{cards}</div>", unsafe_allow_html=True)
+
+
 def render_recommendation_tab(state: Dict[str, object]) -> None:
     """Primary crop card, ranked alternatives, advisory, and Z-score profile."""
     simple = is_simple()
     prediction = state.get("prediction")
     if prediction is None:
-        st.info(
-            "Check your soil readings above, then press **"
-            + tr("run", simple)
-            + "**. To change them, tap ☰ at the top of the screen."
-            if simple
-            else "Configure soil chemistry and microclimate in the sidebar, "
-            "then select **Generate recommendation**."
-        )
+        render_empty_state(simple)
         return
 
     advisory = state["advisory"]
@@ -1539,29 +1622,44 @@ def main() -> None:
         f"auditing · {REPORTED_CV_ACCURACY * 100:.2f}% stratified 5-fold "
         f"cross-validated accuracy across 22 crop classes"
     )
+    features: Dict[str, float] = inputs["features"]  # type: ignore[assignment]
+    # The readings live in the hero. Before a run there is nothing else to
+    # show, and a banner holding only a title leaves a blank slab above the
+    # fold; this also gives the numbers room to be legible at arm's length.
+    reads = [
+        ("Nitrogen", f"{features['N']:.0f}", "kg/ha"),
+        ("Phosphorus", f"{features['P']:.0f}", "kg/ha"),
+        ("Potassium", f"{features['K']:.0f}", "kg/ha"),
+        ("Soil pH", f"{features['ph']:.1f}", ""),
+        ("Temperature", f"{features['temperature']:.0f}", "°C"),
+        ("Rainfall", f"{features['rainfall']:.0f}", "mm"),
+    ]
+    tiles = "".join(
+        f"<div class='gr-read'><div class='k'>{label}</div>"
+        f"<div class='v'>{value}<small>{unit}</small></div></div>"
+        for label, value, unit in reads
+    )
     st.markdown(
         f"""<div class="gr-hero">
-              <h1>🌱 GREENROOT</h1>
+              <div class="gr-hero-top">
+                <h1>🌱 GREENROOT</h1>
+                <span class="gr-hero-place">{inputs['district']}</span>
+              </div>
               <p>{tagline}</p>
+              <div class="gr-reads">{tiles}</div>
             </div>""",
         unsafe_allow_html=True,
     )
 
     bar_left, bar_right = st.columns([2.2, 1], gap="medium")
     with bar_left:
-        features = inputs["features"]
         st.markdown(
-            f"<div class='gr-readout'>"
-            f"<b>{inputs['district']}</b> · "
-            f"N {features['N']:.0f} · P {features['P']:.0f} · "
-            f"K {features['K']:.0f} · pH {features['ph']:.1f} · "
-            f"{features['temperature']:.0f}°C · {features['rainfall']:.0f} mm"
-            f"</div>"
             f"<div class='gr-readout-hint'>"
             + (
-                "Tap ☰ at the top to change these."
+                "These are your land's readings. Tap ☰ at the top to change "
+                "them, then press the green button."
                 if simple
-                else "Adjust inputs in the sidebar."
+                else "Adjust soil chemistry and microclimate in the sidebar."
             )
             + "</div>",
             unsafe_allow_html=True,
@@ -1573,7 +1671,6 @@ def main() -> None:
     ensure_database()
 
     if main_run:
-        features: Dict[str, float] = inputs["features"]  # type: ignore[assignment]
         vector = [features[name] for name in FEATURE_NAMES]
         try:
             prediction = recommender.predict(vector, top_k=3)

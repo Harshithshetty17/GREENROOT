@@ -67,12 +67,13 @@ from src.utils.agronomy_advisory import CRITICAL, INFO, WARNING, generate_adviso
 from src.utils.economics import estimate_cost, price_per_kg_from_bag
 from src.utils.intervention import simulate_advisory
 from src.utils import seasons as season_lib
+from src.utils import i18n
 from src.utils.plain_language import (
     category_name,
     confidence_band,
     describe_quantity,
     severity_name,
-    text as tr,
+    text as _copy,
 )
 from src.utils.report_generator import (
     PDFUnavailableError,
@@ -442,6 +443,52 @@ def _style_axes(axes: plt.Axes, *, grid_axis: str = "x") -> None:
     style_axes(axes, grid_axis=grid_axis)
 
 
+def current_language() -> str:
+    """The interface language for this visitor.
+
+    Held in session_state so it works for a guest -- the people who most need
+    Kannada are the least likely to have made an account, so gating the
+    language behind sign-in would put it out of reach of its own audience.
+    A signed-in user's choice is persisted to their profile as well.
+    """
+    return i18n.normalise(st.session_state.get("ui_language", i18n.ENGLISH))
+
+
+def tr(key: str, simple: bool = True) -> str:
+    """Interface copy in the current register *and* the current language."""
+    return _copy(key, simple, current_language())
+
+
+def score_phrase(confidence: float) -> str:
+    """``91 out of 100`` / ``೧೦೦ ರಲ್ಲಿ ೯೧`` -- the score, in words.
+
+    Kannada puts the total first, so this is a reordering rather than a
+    substitution; a template with the number interpolated in English order
+    would read wrong.
+    """
+    value = f"{confidence:.0f}"
+    if current_language() == i18n.KANNADA:
+        digits = value.translate(str.maketrans("0123456789", "೦೧೨೩೪೫೬೭೮೯"))
+        return f"೧೦೦ ರಲ್ಲಿ {digits}"
+    return f"{value} out of 100"
+
+
+def band_for(confidence: float):
+    """Confidence band in the current language.
+
+    "Fair match, 43 out of 100" is the sentence a farmer actually decides on,
+    so it must not stay English on an otherwise Kannada screen.
+    """
+    band = confidence_band(confidence)
+    label, detail = i18n.band_words(band.label, band.detail, current_language())
+    return dataclasses.replace(band, label=label, detail=detail)
+
+
+def t_extra(key: str, english: str) -> str:
+    """One-off strings that are not in the COPY catalogue."""
+    return i18n.translate(key, english, current_language(), simple=is_simple())
+
+
 def is_simple() -> bool:
     """Whether to address the reader as a farmer rather than an examiner.
 
@@ -497,6 +544,54 @@ def _apply_district(district: str) -> None:
 
 def _on_district_change() -> None:
     _apply_district(st.session_state.get("district_pick", ""))
+
+
+def _adopt_stored_language() -> None:
+    """On first render after sign-in, switch to the language on the profile.
+
+    Only once, and only when the visitor has not already chosen in this
+    session -- otherwise it would keep overriding a deliberate switch.
+    """
+    if st.session_state.get("_language_adopted"):
+        return
+    user = current_user()
+    if user is not None and i18n.is_supported(user.language):
+        st.session_state["ui_language"] = user.language
+        st.session_state["_language_adopted"] = True
+
+
+def render_language_picker() -> None:
+    """Language choice, available to guests and signed-in users alike."""
+    codes = [code for code, _ in i18n.available_languages()]
+    labels = dict(i18n.available_languages())
+    current = current_language()
+
+    chosen = st.sidebar.radio(
+        "Language / ಭಾಷೆ",
+        options=codes,
+        index=codes.index(current),
+        format_func=lambda code: labels[code],
+        horizontal=True,
+        key="ui_language",
+    )
+
+    if chosen == i18n.KANNADA:
+        # Said in Kannada, because the person reading it chose Kannada.
+        st.sidebar.caption(i18n.review_note(i18n.KANNADA))
+        numbers = i18n.coverage()
+        st.sidebar.caption(
+            f"{numbers['copy_translated']} of {numbers['copy_keys']} screens "
+            f"translated; the rest still show English."
+        )
+
+    # Remember it for a signed-in user, so a new phone comes up in their
+    # language. The users table has carried a `language` column since v2.
+    user = current_user()
+    if user is not None and user.language != chosen:
+        try:
+            auth.update_profile(user.id, language=chosen)
+        except Exception as exc:  # noqa: BLE001 - never block on a preference.
+            logging.warning("Could not persist language choice: %s", exc)
 
 
 def current_user():
@@ -795,7 +890,7 @@ def render_controls() -> Dict[str, object]:
         bar = st.columns([1.3, 0.9, 1.1, 1.2], gap="medium")
 
         district = bar[0].selectbox(
-            "Your district" if simple else "District",
+            t_extra("your_district", "Your district") if simple else "District",
             options=districts,
             key="district_pick",
             on_change=_on_district_change,
@@ -810,7 +905,7 @@ def render_controls() -> Dict[str, object]:
         )
 
         acres = bar[1].number_input(
-            "How many acres?" if simple else "Area (acres)",
+            t_extra("how_many_acres", "How many acres?") if simple else "Area (acres)",
             min_value=0.1,
             max_value=1000.0,
             value=float(st.session_state.get("acres", 1.0)),
@@ -824,7 +919,7 @@ def render_controls() -> Dict[str, object]:
         if "season" not in st.session_state:
             st.session_state["season"] = season_lib.default_season(date.today().month)
         bar[2].selectbox(
-            "When will you sow?" if simple else "Cropping season",
+            t_extra("when_sow", "When will you sow?") if simple else "Cropping season",
             options=season_keys,
             format_func=lambda key: season_lib.SEASONS[key][0],
             key="season",
@@ -858,7 +953,7 @@ def render_controls() -> Dict[str, object]:
                     unsafe_allow_html=True,
                 )
             if st.button(
-                "Use live weather" if simple else "Fetch live telemetry",
+                t_extra("use_live_weather", "Use live weather") if simple else "Fetch live telemetry",
                 width="stretch",
                 key="fetch_wx",
             ):
@@ -891,7 +986,7 @@ def render_controls() -> Dict[str, object]:
 
     values: Dict[str, float] = {}
     with st.expander(
-        "Change my soil readings" if simple else "Manual feature override",
+        t_extra("change_readings", "Change my soil readings") if simple else "Manual feature override",
         expanded=False,
     ):
         if baseline is not None:
@@ -1052,22 +1147,28 @@ def render_commercial_panel(state: Dict[str, object], simple: bool) -> None:
         )
 
     # ---- Financial ROI -------------------------------------------------- #
-    st.markdown(f"#### {'What this could earn' if simple else 'Benchmark economics'}")
+    earn_heading = (
+        t_extra("what_earn", "What this could earn")
+        if simple
+        else "Benchmark economics"
+    )
+    st.markdown(f"#### {earn_heading}")
     roi = st.columns(3)
     roi[0].metric(
-        "Expected harvest" if simple else "Gross yield",
+        t_extra("expected_harvest", "Expected harvest") if simple
+        else "Gross yield",
         f"{money.yield_quintals:,.0f} quintal"
         + ("" if abs(money.yield_quintals - 1) < 0.5 else "s"),
         help=f"{crop_profile.yield_quintal_per_acre:g} quintals per acre "
              f"× {acres:g} acre(s).",
     )
     roi[1].metric(
-        "Mandi rate" if simple else "APMC benchmark",
+        t_extra("mandi_rate", "Mandi rate") if simple else "APMC benchmark",
         f"{_rupees(crop_profile.price_per_quintal)}/qtl",
         help="Edit this above if you know your own mandi's rate.",
     )
     roi[2].metric(
-        "Money left over" if simple else "Net margin",
+        t_extra("money_left", "Money left over") if simple else "Net margin",
         _rupees(money.net),
     )
     roi[2].caption(f"after {_rupees(money.cost)} of costs")
@@ -1134,7 +1235,10 @@ def render_commercial_panel(state: Dict[str, object], simple: bool) -> None:
         temperature_c=float(features.get("temperature", 0.0)),
         is_live=bool(getattr(weather, "is_live", False)),
     )
-    spray_heading = "Can I spray today?" if simple else "Today's spray window"
+    spray_heading = (
+        t_extra("can_i_spray", "Can I spray today?") if simple
+        else "Today's spray window"
+    )
     st.markdown(f"#### {spray_heading}")
     renderer = {
         agronomy.CLEAR: st.success,
@@ -1144,9 +1248,12 @@ def render_commercial_panel(state: Dict[str, object], simple: bool) -> None:
     renderer(f"{advice.icon} **{advice.headline}** — {advice.detail}")
 
     # ---- Roadmap -------------------------------------------------------- #
-    st.markdown(
-        f"#### {'Your plan for the season' if simple else 'Crop calendar'}"
+    plan_heading = (
+        t_extra("season_plan", "Your plan for the season")
+        if simple
+        else "Crop calendar"
     )
+    st.markdown(f"#### {plan_heading}")
     stages = agronomy.roadmap(crop)
     columns = st.columns(len(stages))
     for column, (index, stage) in zip(columns, enumerate(stages, start=1)):
@@ -1168,13 +1275,13 @@ def render_recommendation_tab(state: Dict[str, object]) -> None:
 
     advisory = state["advisory"]
     district = state["district"]
-    band = confidence_band(prediction.confidence)
+    band = band_for(prediction.confidence)
 
     left, right = st.columns([1, 1.25], gap="large")
 
     with left:
         headline = (
-            f"{band.label} · {prediction.confidence:.0f} out of 100"
+            f"{band.label} · {score_phrase(prediction.confidence)}"
             if simple
             else f"{prediction.confidence:.2f}% posterior probability"
         )
@@ -1185,8 +1292,9 @@ def render_recommendation_tab(state: Dict[str, object]) -> None:
         caveat = (
             ""
             if prediction.confidence >= 60
-            else f"<div class='warnline'>{'Not a clear answer' if simple else 'Low posterior'}"
-            f" — {'read this with care' if simple else 'treat as indicative'}</div>"
+            else f"<div class='warnline'>"
+            f"{t_extra('not_clear', 'Not a clear answer') if simple else 'Low posterior'}"
+            f"{'' if simple else ' — treat as indicative'}</div>"
         )
         st.markdown(
             f'<div class="gr-primary{tone}">'
@@ -1230,7 +1338,7 @@ def render_recommendation_tab(state: Dict[str, object]) -> None:
                 score = (
                     "less than 1 out of 100"
                     if candidate.confidence_pct < 1
-                    else f"{candidate.confidence_pct:.0f} out of 100"
+                    else score_phrase(candidate.confidence_pct)
                 )
                 label = f"**{candidate.rank}. {candidate.crop.capitalize()}** — {score}"
             else:
@@ -2287,6 +2395,11 @@ def main() -> None:
         st.stop()
 
     st.sidebar.markdown("### GREENROOT")
+
+    # Above the account panel and outside it: a guest must be able to change
+    # language without signing up.
+    render_language_picker()
+
     st.sidebar.toggle(
         "👨‍🏫 Examiner / AI Mode",
         value=False,
@@ -2305,6 +2418,7 @@ def main() -> None:
     # Must precede the account panel: that panel reads the users and
     # sessions tables, which do not exist until the schema is initialised.
     ensure_database()
+    _adopt_stored_language()
     render_account_sidebar(is_simple())
     inputs = render_controls()
     simple = is_simple()
@@ -2409,8 +2523,11 @@ def main() -> None:
         hint_slot.markdown(
             "<div class='gr-readout-hint'>"
             + (
-                "These are your land's readings. Change your district "
-                "above if they are wrong, then press the green button."
+                t_extra(
+                    "these_are_readings",
+                    "These are your land's readings. Change your district "
+                    "above if they are wrong, then press the green button.",
+                )
                 if simple
                 else "Set the district above, or override features in the "
                 "manual expander."
@@ -2419,9 +2536,9 @@ def main() -> None:
             unsafe_allow_html=True,
         )
     else:
-        band = confidence_band(answered.confidence)
+        band = band_for(answered.confidence)
         score = (
-            f"{band.label} \u00b7 {answered.confidence:.0f} out of 100"
+            f"{band.label} \u00b7 {score_phrase(answered.confidence)}"
             if simple
             else f"{answered.confidence:.2f}% posterior"
         )
@@ -2446,8 +2563,11 @@ def main() -> None:
         hint_slot.markdown(
             "<div class='gr-readout-hint'>"
             + (
-                "Changed something? Edit your readings at the top, then "
-                "press the button again."
+                t_extra(
+                    "changed_something",
+                    "Changed something? Edit your readings at the top, then "
+                    "press the button again.",
+                )
                 if simple
                 else "Change the inputs above and re-run to refresh every "
                 "tab."
@@ -2467,7 +2587,8 @@ def main() -> None:
         # screen is gone from this view entirely: Jaccard agreement between
         # TreeSHAP and LIME is an examiner's question, not a farmer's. It is
         # still computed, and still one toggle away in Examiner mode.
-        tabs = st.tabs(["🌱 Your Advice", "🗂️ Saved & Card"])
+        tabs = st.tabs([t_extra("your_advice", "🌱 Your Advice"),
+                        t_extra("saved_and_card", "🗂️ Saved & Card")])
         with tabs[0]:
             render_recommendation_tab(state)
             if state.get("prediction") is not None:

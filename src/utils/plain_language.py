@@ -275,7 +275,7 @@ SEVERITY_NAMES: Dict[str, str] = {
 }
 
 
-def text(key: str, simple: bool = True) -> str:
+def text(key: str, simple: bool = True, language: str = "en") -> str:
     """Return interface copy in the requested register.
 
     Parameters
@@ -285,6 +285,11 @@ def text(key: str, simple: bool = True) -> str:
     simple:
         ``True`` for the farmer-facing wording, ``False`` for the technical
         wording.
+    language:
+        Interface language. Kannada applies to the farmer register only --
+        the technical register is English terminology and translating it
+        would make it worse. An untranslated key falls back to English
+        rather than blanking.
 
     Returns
     -------
@@ -295,7 +300,14 @@ def text(key: str, simple: bool = True) -> str:
     entry = COPY.get(key)
     if entry is None:
         return key
-    return entry[0] if simple else entry[1]
+    english = entry[0] if simple else entry[1]
+    if language == "en":
+        return english
+    # Imported here rather than at module scope: i18n reads COPY back for its
+    # coverage report, and a top-level import would be circular.
+    from src.utils.i18n import translate
+
+    return translate(key, english, language, simple=simple)
 
 
 def category_name(category: str, simple: bool = True) -> str:

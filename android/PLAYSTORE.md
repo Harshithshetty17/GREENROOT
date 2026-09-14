@@ -222,6 +222,24 @@ actually does; re-check them if you change the code.
 |---|---|---|---|---|
 | Location → Approximate location | Yes | No | Optional | App functionality |
 | App activity → Other user-generated content (soil readings) | Yes | No | Required | App functionality |
+| Personal info → Phone number | Yes | No | **Optional** | Account management |
+| Personal info → Name | Yes | No | Optional | Account management |
+| Personal info → Other info (village) | Yes | No | Optional | App functionality |
+
+**Mark the three account rows "Optional".** They are collected only if the
+user chooses to create an account; the whole recommendation flow works as a
+guest. Declaring them Required would be inaccurate and is the kind of thing
+that gets a data-safety form rejected.
+
+**You must also answer these, and the answers changed when login shipped:**
+
+- **Is a user account required to use the app?** → **No.** Guest mode is the
+  default path.
+- **Can users request that their data be deleted?** → **Yes**, and the app has
+  an in-app route: Settings → Delete my account. Give that as the method.
+- **Do you collect passwords or PINs?** → The PIN is collected and stored only
+  as a bcrypt hash. Declare it under Account management; never describe it as
+  not collected.
 
 Why *Approximate location* is declared: the district name you type is a rough
 area. It is not read from GPS, but Play's definition covers user-provided

@@ -21,10 +21,32 @@ sensor on your phone.
 recommendation*, the crop, the confidence score, the readings and the date are
 written to two places: the GREENROOT server, and your own phone.
 
-**Nothing else.** GREENROOT does not collect your name, phone number, email
-address, contacts, photos, files, device identifiers, or advertising ID. It
-does not use the phone's GPS or any other location sensor. It contains no
-analytics, advertising, or crash-reporting SDK.
+**Only if you choose to create an account:** your mobile number, a PIN, and
+whatever you put in your profile (a name, a village, your usual district and
+plot size). **You do not need an account.** Every part of the crop
+recommendation works without one, and if you never sign in none of this is
+collected.
+
+**Nothing else, ever.** GREENROOT does not collect your email address,
+contacts, photos, files, device identifiers, or advertising ID. It does not
+use the phone's GPS or any other location sensor. It contains no analytics,
+advertising, or crash-reporting SDK.
+
+## About your PIN
+
+Your PIN is never stored. What is stored is a bcrypt hash of it, which cannot
+be reversed — nobody, including us, can read your PIN back or recover it for
+you. If you forget it, the account cannot be unlocked and you would need to
+start a new one.
+
+After five wrong PINs an account locks for fifteen minutes. This is
+deliberate: a 4-digit PIN is short, and the lock is what stops somebody
+guessing their way in.
+
+Be aware that a 4-digit PIN is not strong protection. We chose it because a
+long password typed on a phone in a field is a barrier that stops people
+using the app at all — and because an account here holds crop advice, not
+money or identity documents. Do not reuse a PIN you use for banking.
 
 ## About the district name
 
@@ -38,6 +60,7 @@ anything you like in this field, including nothing meaningful.
 | Where | What | Why |
 |---|---|---|
 | GREENROOT server | Readings, recommended crop, confidence, timestamp, district | The recommendation runs on the server; the record makes past advice auditable |
+| GREENROOT server | Your mobile number and PIN hash — **only if you create an account** | So your saved advice follows you to another phone |
 | Your phone | The recommendations you chose to save | So you can read your advice in a field with no signal |
 | OpenWeatherMap | The district name only, and only if live weather is enabled | To fetch current weather for that area |
 
@@ -57,6 +80,19 @@ a new phone if you use Google backup or a device-to-device transfer.
 **Deleting them:** uninstall the app, or go to Settings → Apps → GreenRoot →
 Storage → Clear storage. Either removes every saved card from the device
 immediately.
+
+## Deleting your account
+
+In the app: **Settings → Delete my account**. You will be asked to type DELETE
+to confirm.
+
+This removes your account, your mobile number, your PIN hash, your profile and
+your saved plots. It happens immediately and cannot be undone.
+
+Recommendations you saved are **kept but detached** — they remain in the
+records with no link to you or your number, because they are the agronomic
+audit trail the system exists to hold. If you want those deleted as well,
+email the address below and say so.
 
 ## How long the server keeps records
 

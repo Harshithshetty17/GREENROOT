@@ -42,9 +42,17 @@ _THREAD_LOCAL = threading.local()
 
 #: Schema version, bumped whenever :data:`_SCHEMA` changes shape. Persisted in
 #: SQLite's ``user_version`` pragma and used to drive forward migrations.
-SCHEMA_VERSION: int = 1
+SCHEMA_VERSION: int = 2
 
 TABLE_NAME: str = "audit_logs"
+
+#: Accounts. A row here is created only when someone chooses to sign up;
+#: guest use writes ``user_id IS NULL`` and is the default path.
+USERS_TABLE: str = "users"
+
+#: Server-side sessions. Tokens are stored hashed, never in the clear, so a
+#: dump of this table cannot be replayed as a login.
+SESSIONS_TABLE: str = "sessions"
 
 _SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
@@ -63,6 +71,57 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
     primary_shap_driver TEXT,
     jaccard_index       REAL    CHECK (jaccard_index IS NULL
                                        OR jaccard_index BETWEEN 0 AND 1)
+);
+"""
+
+_USERS_SCHEMA = f"""
+CREATE TABLE IF NOT EXISTS {USERS_TABLE} (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    phone         TEXT    NOT NULL UNIQUE,
+    pin_hash      TEXT    NOT NULL,
+    display_name  TEXT,
+    village       TEXT,
+    district      TEXT,
+    acres         REAL    CHECK (acres IS NULL OR acres > 0),
+    language      TEXT    NOT NULL DEFAULT 'en',
+    created_at    TEXT    NOT NULL,
+    last_login_at TEXT,
+    failed_count  INTEGER NOT NULL DEFAULT 0,
+    locked_until  TEXT
+);
+"""
+
+_SESSIONS_SCHEMA = f"""
+CREATE TABLE IF NOT EXISTS {SESSIONS_TABLE} (
+    token_hash TEXT    PRIMARY KEY,
+    user_id    INTEGER NOT NULL,
+    created_at TEXT    NOT NULL,
+    expires_at TEXT    NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES {USERS_TABLE}(id) ON DELETE CASCADE
+);
+"""
+
+#: A farmer's saved fields. The reason an account is worth having: someone
+#: with three plots should not retype seven readings for each one.
+PLOTS_TABLE: str = "plots"
+
+_PLOTS_SCHEMA = f"""
+CREATE TABLE IF NOT EXISTS {PLOTS_TABLE} (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL,
+    name       TEXT    NOT NULL,
+    district   TEXT    NOT NULL,
+    acres      REAL    NOT NULL CHECK (acres > 0),
+    N          REAL    NOT NULL CHECK (N  >= 0),
+    P          REAL    NOT NULL CHECK (P  >= 0),
+    K          REAL    NOT NULL CHECK (K  >= 0),
+    pH         REAL    NOT NULL CHECK (pH > 0),
+    temp       REAL    NOT NULL,
+    humidity   REAL    NOT NULL,
+    rainfall   REAL    NOT NULL CHECK (rainfall >= 0),
+    created_at TEXT    NOT NULL,
+    UNIQUE (user_id, name),
+    FOREIGN KEY (user_id) REFERENCES {USERS_TABLE}(id) ON DELETE CASCADE
 );
 """
 
@@ -90,6 +149,9 @@ LOG_COLUMNS: Sequence[str] = (
     "confidence",
     "primary_shap_driver",
     "jaccard_index",
+    # NULL means guest. Every row written before accounts existed is a guest
+    # row, which is the correct reading of it.
+    "user_id",
 )
 
 
@@ -205,11 +267,17 @@ def init_db(db_path: Optional[Path] = None) -> None:
     any pending forward migration via :func:`_migrate`.
     """
     with get_connection(db_path, write=True) as conn:
-        conn.executescript(_SCHEMA)
+        _create_all(conn)
         for statement in _INDEXES:
             conn.execute(statement)
         _migrate(conn)
     logger.debug("Schema initialised at version %d", SCHEMA_VERSION)
+
+
+def _create_all(conn: sqlite3.Connection) -> None:
+    """Create every table. Idempotent -- all use IF NOT EXISTS."""
+    for ddl in (_SCHEMA, _USERS_SCHEMA, _SESSIONS_SCHEMA, _PLOTS_SCHEMA):
+        conn.executescript(ddl)
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -236,14 +304,27 @@ def _migrate(conn: sqlite3.Connection) -> None:
         for row in conn.execute(f"PRAGMA table_info({TABLE_NAME});").fetchall()
     }
     # Additive column migration: bring legacy tables up to the current shape.
+    #
+    # v2 adds accounts. Every pre-existing row predates them and is therefore
+    # guest-owned: the new column is nullable with no default, so ALTER TABLE
+    # leaves those rows intact with user_id IS NULL. Rewriting or deleting
+    # them to fit the new shape would destroy the ledger this system exists
+    # to keep.
     for column, ddl in (
         ("primary_shap_driver", "TEXT"),
         ("jaccard_index", "REAL"),
+        ("user_id", "INTEGER"),
     ):
         if existing and column not in existing:
             conn.execute(f"ALTER TABLE {TABLE_NAME} ADD COLUMN {column} {ddl};")
             logger.info("Migrated: added column %s.%s", TABLE_NAME, column)
 
+    # The v2 tables are created by _create_all, which runs before this and is
+    # idempotent; nothing to backfill for them.
+    conn.execute(
+        f"CREATE INDEX IF NOT EXISTS idx_{TABLE_NAME}_user "
+        f"ON {TABLE_NAME} (user_id);"
+    )
     conn.execute(f"PRAGMA user_version={SCHEMA_VERSION};")
 
 
@@ -270,6 +351,7 @@ def log_transaction(
     primary_shap_driver: Optional[str] = None,
     jaccard_index: Optional[float] = None,
     *,
+    user_id: Optional[int] = None,
     timestamp: Optional[str] = None,
     db_path: Optional[Path] = None,
 ) -> int:
@@ -324,6 +406,7 @@ def log_transaction(
         float(confidence),
         str(primary_shap_driver) if primary_shap_driver is not None else None,
         float(jaccard_index) if jaccard_index is not None else None,
+        int(user_id) if user_id is not None else None,
     )
     placeholders = ", ".join("?" for _ in LOG_COLUMNS)
     sql = (
@@ -349,6 +432,8 @@ def fetch_audit_history(
     crop: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    user_id: Optional[int] = None,
+    guest_only: bool = False,
     db_path: Optional[Path] = None,
 ) -> pd.DataFrame:
     """Return the most recent audit records as a DataFrame, newest first.
@@ -392,6 +477,16 @@ def fetch_audit_history(
         params.append(bound)
 
     sql = f"SELECT id, {', '.join(LOG_COLUMNS)} FROM {TABLE_NAME}"
+    # Ownership scoping. This is the clause that stops one farmer reading
+    # another's ledger, so it is applied here in SQL rather than by filtering
+    # a DataFrame afterwards -- a filter that a caller can forget to apply is
+    # not access control.
+    if user_id is not None:
+        clauses.append("user_id = ?")
+        params.append(int(user_id))
+    elif guest_only:
+        clauses.append("user_id IS NULL")
+
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
     sql += " ORDER BY id DESC"

@@ -56,6 +56,7 @@ from src.core.theme import (
     series_palette,
     style_axes,
 )
+from src import auth
 from src.database import db, db_manager
 from src.models.batch import BatchProcessor, BatchResult, MAX_BATCH_ROWS, build_template
 from src.models.inference import CropRecommender, ValidationError
@@ -486,6 +487,148 @@ def _apply_district(district: str) -> None:
 
 def _on_district_change() -> None:
     _apply_district(st.session_state.get("district_pick", ""))
+
+
+def current_user():
+    """The signed-in user, or None for a guest.
+
+    Resolved from the session token on every run rather than cached: a
+    revoked or expired token must stop working immediately, and an object
+    left in session_state would outlive the session it represents.
+
+    An unreachable database degrades to guest. Everything a guest can do
+    works without persistence, so a storage failure must not lock people out
+    of the recommendation itself.
+    """
+    try:
+        return auth.user_for_token(st.session_state.get("auth_token"))
+    except Exception as exc:  # noqa: BLE001 - never block the app on storage.
+        logging.warning("Could not resolve session: %s", exc)
+        return None
+
+
+def _sign_out() -> None:
+    auth.revoke_token(st.session_state.pop("auth_token", None))
+    for key in ("account_panel", "signin_error"):
+        st.session_state.pop(key, None)
+
+
+def render_account_sidebar(simple: bool) -> None:
+    """Sign in, profile and settings -- all of it in the sidebar.
+
+    Nothing here appears in the recommendation flow. A farmer who never signs
+    in should see one small affordance and nothing else: the app works fully
+    as a guest, and that is the default.
+    """
+    user = current_user()
+    st.sidebar.markdown("---")
+
+    if user is None:
+        st.sidebar.markdown("#### Your account")
+        st.sidebar.caption(
+            "You do not need an account. Sign in only if you want your saved "
+            "advice on more than one phone."
+            if simple
+            else "Optional. Signing in scopes the ledger to this account."
+        )
+        with st.sidebar.expander("Sign in / Create account", expanded=False):
+            phone = st.text_input("Mobile number", key="signin_phone",
+                                  placeholder="9876543210", max_chars=15)
+            pin = st.text_input(f"{auth.accounts.PIN_LENGTH}-digit PIN",
+                                key="signin_pin", type="password", max_chars=6)
+            name = st.text_input("Your name (new accounts only)",
+                                 key="signin_name")
+            go, make = st.columns(2)
+            if go.button("Sign in", width="stretch"):
+                try:
+                    signed = auth.sign_in(phone, pin)
+                    st.session_state["auth_token"] = auth.issue_token(signed.id)
+                    st.rerun()
+                except auth.AuthError as exc:
+                    st.error(str(exc))
+            if make.button("Create", width="stretch"):
+                try:
+                    created = auth.register(phone, pin, display_name=name or None,
+                                            district=st.session_state.get(
+                                                "district_pick"))
+                    st.session_state["auth_token"] = auth.issue_token(created.id)
+                    st.rerun()
+                except auth.AuthError as exc:
+                    st.error(str(exc))
+            st.caption(
+                "Your PIN is stored scrambled and cannot be read back, even "
+                "by us. Do not use 1234 or your birth year."
+            )
+        return
+
+    # ---- signed in ------------------------------------------------------
+    st.sidebar.markdown(f"#### 👤 {user.greeting}")
+    st.sidebar.caption(user.masked_phone)
+
+    if st.sidebar.button("Log out", width="stretch"):
+        _sign_out()
+        st.rerun()
+
+    with st.sidebar.expander("Profile", expanded=False):
+        districts = cached_districts()
+        name = st.text_input("Name", value=user.display_name or "",
+                             key="pf_name")
+        village = st.text_input("Village", value=user.village or "",
+                                key="pf_village")
+        index = districts.index(user.district) if user.district in districts else 0
+        district = st.selectbox("Usual district", districts, index=index,
+                                key="pf_district")
+        acres = st.number_input("Usual plot size (acres)", 0.1, 1000.0,
+                                float(user.acres or 1.0), 0.5, key="pf_acres")
+        if st.button("Save profile", width="stretch"):
+            auth.update_profile(user.id, display_name=name or None,
+                                village=village or None, district=district,
+                                acres=float(acres))
+            st.success("Saved.")
+            st.rerun()
+
+    with st.sidebar.expander("Settings", expanded=False):
+        st.caption(
+            "An English-only interface today. Kannada is planned; the crop "
+            "names on your card are already bilingual."
+        )
+        st.markdown("**Change your PIN**")
+        old = st.text_input("Current PIN", type="password", key="pin_old",
+                            max_chars=6)
+        new = st.text_input("New PIN", type="password", key="pin_new",
+                            max_chars=6)
+        if st.button("Change PIN", width="stretch"):
+            try:
+                auth.change_pin(user.id, old, new)
+                st.success("PIN changed.")
+            except auth.AuthError as exc:
+                st.error(str(exc))
+
+        st.markdown("---")
+        st.markdown("**Delete my account**")
+        st.caption(
+            "This removes your account, your PIN and your saved plots from "
+            "this device and the server. Advice you saved stays in the "
+            "records, but is no longer linked to you."
+        )
+        confirm = st.text_input('Type DELETE to confirm', key="del_confirm")
+        if st.button("Delete my account permanently", width="stretch"):
+            if confirm.strip().upper() != "DELETE":
+                st.error("Type DELETE in the box to confirm.")
+            else:
+                auth.delete_account(user.id)
+                _sign_out()
+                st.rerun()
+
+    with st.sidebar.expander("Help & about", expanded=False):
+        st.markdown(
+            "**What is this?** GREENROOT suggests a crop for your land from "
+            "seven soil and weather readings, and shows how it decided.\n\n"
+            "**Is it a promise?** No. It is advice to help you decide. Check "
+            "with your local agriculture officer before sowing.\n\n"
+            "**Do I need an account?** No. Everything works without one."
+        )
+        st.caption("GREENROOT · 22 crops · advisory output only")
 
 
 def render_controls() -> Dict[str, object]:
@@ -1193,6 +1336,7 @@ def _persist(state: Dict[str, object]) -> None:
     consensus = state.get("consensus")
     features = prediction.raw_features
     try:
+        signed_in = current_user()
         record_id = db_manager.log_transaction(
             district=str(state["district"]),
             n=features["N"],
@@ -1206,6 +1350,7 @@ def _persist(state: Dict[str, object]) -> None:
             confidence=prediction.confidence,
             primary_shap_driver=consensus.primary_driver if consensus else None,
             jaccard_index=consensus.jaccard if consensus else None,
+            user_id=signed_in.id if signed_in else None,
         )
     except Exception as exc:  # noqa: BLE001 - surface, never crash the dashboard.
         st.error(f"Could not persist the recommendation: {exc}")
@@ -1778,7 +1923,18 @@ def render_audit_tab() -> None:
             "How many to show" if simple else "Max records", 10, 5000, 200, step=10
         )
 
+    # A farmer sees their own records; a guest sees the guest ledger on this
+    # server. Examiner mode is deliberately unscoped -- it is the audit view.
+    viewer = current_user()
+    scope = (
+        {"user_id": viewer.id}
+        if viewer is not None and simple
+        else {"guest_only": True}
+        if simple
+        else {}
+    )
     frame = db_manager.fetch_audit_history(
+        **scope,
         limit=int(limit),
         start_date=str(start),
         end_date=str(end),
@@ -2018,6 +2174,10 @@ def main() -> None:
         else "Turn this on to see how the model reached its answer."
     )
 
+    # Must precede the account panel: that panel reads the users and
+    # sessions tables, which do not exist until the schema is initialised.
+    ensure_database()
+    render_account_sidebar(is_simple())
     inputs = render_controls()
     simple = is_simple()
 

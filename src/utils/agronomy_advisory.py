@@ -392,20 +392,26 @@ def _nutrition_items(
                 )
             )
         else:
+            # Rank growth at the cost of yield is a nitrogen effect. Saying it
+            # of a phosphorus or potassium surplus is simply untrue, and this
+            # is advice somebody acts on with a bag in their hand.
+            excess_nitrogen = nutrient == "N"
             items.append(
                 AdvisoryItem(
                     "Nutrition",
                     WARNING,
                     f"{nutrient} exceeds the {crop} envelope by {gap:.0f} "
                     f"kg/ha. Withhold {nutrient}-bearing fertiliser this "
-                    f"season; the surplus leaches to groundwater and, for "
-                    f"nitrogen, drives vegetative growth at the cost of yield.",
+                    f"season; the surplus leaches to groundwater"
+                    + (" and drives vegetative growth at the cost of yield."
+                       if excess_nitrogen else " without benefiting the crop."),
                     plain=(
                         f"You already have plenty of "
                         f"{_NUTRIENT_WORDS[nutrient]}. Do not add any more "
-                        f"this season. It would be money wasted, it washes "
-                        f"into the groundwater, and too much makes the plant "
-                        f"grow leaves instead of grain."
+                        f"this season. It would be money wasted, and it "
+                        f"washes into the groundwater."
+                        + (" Too much also makes the plant grow leaves "
+                           "instead of grain." if excess_nitrogen else "")
                     ),
                 )
             )

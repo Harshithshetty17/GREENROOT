@@ -311,3 +311,41 @@ class TestCanonical:
         for key, (english, _) in season_lib.SEASONS.items():
             for language in (ENGLISH, KANNADA):
                 assert season_lib.canonical(season_name(key, english, language)) == key
+
+
+class TestSurplusNutrientWording:
+    """Rank growth at the cost of yield is a nitrogen effect. Telling a
+    farmer that surplus potassium makes the plant grow leaves instead of
+    grain is simply untrue, and it is advice acted on with a bag in hand."""
+
+    @staticmethod
+    def _surplus(nutrient: str):
+        from src.utils.agronomy_advisory import generate_advisory
+
+        # Far above every crop's envelope on one nutrient at a time.
+        readings = {"N": 40.0, "P": 30.0, "K": 35.0, "temperature": 26.0,
+                    "humidity": 70.0, "ph": 6.5, "rainfall": 150.0}
+        readings[nutrient] = 400.0
+        report = generate_advisory("rice", readings)
+        return [i for i in report.items
+                if i.category == "Nutrition" and "exceeds" in i.say(False)]
+
+    def test_nitrogen_still_warns_about_leaves(self):
+        found = self._surplus("N")
+        assert found, "expected a surplus warning for N"
+        assert any("vegetative growth" in i.say(False) for i in found)
+        assert any("leaves instead of grain" in i.say(True) for i in found)
+
+    @pytest.mark.parametrize("nutrient", ["P", "K"])
+    def test_the_others_do_not(self, nutrient):
+        found = self._surplus(nutrient)
+        assert found, f"expected a surplus warning for {nutrient}"
+        for item in found:
+            assert "vegetative growth" not in item.say(False)
+            assert "leaves instead of grain" not in item.say(True)
+
+    @pytest.mark.parametrize("nutrient", ["N", "P", "K"])
+    def test_every_surplus_still_says_do_not_add_more(self, nutrient):
+        found = self._surplus(nutrient)
+        assert any("Do not add any more" in i.say(True) for i in found)
+        assert any("groundwater" in i.say(True) for i in found)

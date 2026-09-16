@@ -24,13 +24,16 @@ Usage
 from __future__ import annotations
 
 import argparse
+import ast
 import csv
 import io
 import sys
 from pathlib import Path
-from typing import List, NamedTuple, Tuple
+from typing import Dict, List, NamedTuple, Tuple
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+ROOT = Path(__file__).resolve().parent
+APP = ROOT / "app.py"
+sys.path.insert(0, str(ROOT))
 
 from src.utils import i18n  # noqa: E402
 from src.utils.agronomy import CROPS, SURVEY_CORROBORATED, roadmap  # noqa: E402
@@ -70,6 +73,82 @@ def _english_action(stage_name: str) -> Tuple[str, int]:
     return "", 0
 
 
+#: Three keys the app reads by subscript rather than through ``t_extra`` --
+#: the unit words, which are chosen by a helper, and the picker label, which
+#: is deliberately bilingual. They carry no fallback argument to read back,
+#: so their English is named here.
+DIRECT_ENGLISH: Dict[str, str] = {
+    "acre": "acre / acres",
+    "bags": "bag / bags",
+    "language": "Language",
+}
+
+
+def english_fallbacks(source: Path | None = None) -> Dict[str, str]:
+    """``key -> the English the app would have shown`` for the extra strings.
+
+    :data:`~src.utils.i18n.KANNADA_EXTRA` holds Kannada only: the English for
+    those keys lives at the call site, as the fallback argument to
+    ``t_extra(key, english)``. Without it the review sheet shows a reviewer
+    47 Kannada lines and nothing to check them against.
+
+    So it is read back out of ``app.py`` rather than kept as a second
+    catalogue here -- the English in the sheet is then literally the English
+    the app would render, and cannot drift from it.
+    """
+    tree = ast.parse((source or APP).read_text(encoding="utf-8"))
+    found: Dict[str, str] = {}
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "t_extra" and len(node.args) >= 2
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[1], ast.Constant)):
+            # First call site wins; a key used twice with different wording
+            # would be a bug in app.py, not something to paper over here.
+            found.setdefault(node.args[0].value, node.args[1].value)
+    return found
+
+
+def _english_band_details() -> Dict[str, str]:
+    """``band label -> the sentence under the crop card``.
+
+    Swept out of :func:`~src.utils.plain_language.confidence_band` at scores
+    that select each band, rather than copied, so the sheet cannot show a
+    reviewer a sentence the app has stopped saying.
+    """
+    from src.utils.plain_language import confidence_band
+
+    return {band.label: band.detail
+            for band in (confidence_band(score) for score in (95, 70, 45, 20))}
+
+
+def phrase_fallbacks(source: Path | None = None) -> Dict[str, str]:
+    """``key -> English`` for the interpolated sentences.
+
+    Same idea as :func:`english_fallbacks`, for ``i18n.phrase(key, english,
+    ...)``. The English there is built with an f-string, so the literal parts
+    are joined and the interpolations become the placeholder names the
+    Kannada uses -- which is what a reviewer needs to see anyway.
+    """
+    tree = ast.parse((source or APP).read_text(encoding="utf-8"))
+    found: Dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "phrase" and len(node.args) >= 2
+                and isinstance(node.args[0], ast.Constant)):
+            continue
+        english = node.args[1]
+        if isinstance(english, ast.Constant):
+            found.setdefault(node.args[0].value, str(english.value))
+        elif isinstance(english, ast.JoinedStr):
+            found.setdefault(node.args[0].value, "".join(
+                part.value if isinstance(part, ast.Constant)
+                else "{" + ast.unparse(part.value).split(".")[-1] + "}"
+                for part in english.values))
+    return found
+
+
 def collect() -> List[Row]:
     """Every translated string in the app, grouped for a human reader."""
     rows: List[Row] = []
@@ -79,14 +158,17 @@ def collect() -> List[Row]:
         rows.append(Row("Interface", key, english, kannada,
                         "buttons, headings and labels"))
 
+    fallbacks = {**DIRECT_ENGLISH, **english_fallbacks()}
     for key, kannada in sorted(i18n.KANNADA_EXTRA.items()):
-        rows.append(Row("Interface (extra)", key, "", kannada,
-                        "controls and section titles"))
+        rows.append(Row("Interface (extra)", key, fallbacks.get(key, ""),
+                        kannada, "controls and section titles"))
 
+    details = _english_band_details()
     for english, (label_kn, detail_kn) in i18n.KANNADA_BANDS.items():
         rows.append(Row("Confidence", f"band:{english}", english, label_kn,
                         "beside the crop name -- the headline judgement"))
-        rows.append(Row("Confidence", f"band-detail:{english}", "", detail_kn,
+        rows.append(Row("Confidence", f"band-detail:{english}",
+                        details.get(english, ""), detail_kn,
                         "the sentence under the crop card"))
 
     # Field instructions first among the untranslated-by-evidence groups:
@@ -107,8 +189,17 @@ def collect() -> List[Row]:
         rows.append(Row("Timing", f"when:{key}", key.replace("_", " "), kannada,
                         "beside each reminder -- how soon it falls"))
 
+    for english, kannada in i18n.KANNADA_MONTHS.items():
+        rows.append(Row("Months", f"month:{english}", english, kannada,
+                        "a saved record's date, inside a table column"))
+
+    for english, kannada in i18n.KANNADA_LEDGER_COLUMNS.items():
+        rows.append(Row("Table headers", f"column:{english}", english, kannada,
+                        "the saved-records table -- a narrow phone column"))
+
+    said = phrase_fallbacks()
     for key, kannada in sorted(i18n.KANNADA_PHRASES.items()):
-        rows.append(Row("Sentences", key, "", kannada,
+        rows.append(Row("Sentences", key, said.get(key, ""), kannada,
                         "under the soil card and the weather box"))
 
     rows.append(Row("Warning", "review_status", i18n.REVIEW_STATUS,

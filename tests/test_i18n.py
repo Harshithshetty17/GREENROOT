@@ -296,6 +296,18 @@ class TestNothingIsTranslatedIntoTheVoid:
             "translated but never shown: " + ", ".join(sorted(unused))
         )
 
+    def test_the_review_sheet_can_show_an_english_line_for_every_key(self):
+        """A reviewer given a Kannada string and nothing to compare it
+        against cannot review it. Every extra key must resolve to English
+        somewhere -- a t_extra fallback, or the named exceptions."""
+        from export_translations import DIRECT_ENGLISH, english_fallbacks
+
+        known = set(english_fallbacks()) | set(DIRECT_ENGLISH)
+        assert set(i18n.KANNADA_EXTRA) <= known, (
+            "no English to review against: "
+            + ", ".join(sorted(set(i18n.KANNADA_EXTRA) - known))
+        )
+
     def test_every_key_the_app_asks_for_has_a_translation(self):
         """The other direction: a call site with no entry silently renders
         its English fallback on a Kannada screen."""
@@ -303,3 +315,33 @@ class TestNothingIsTranslatedIntoTheVoid:
         assert not missing, (
             "asked for but untranslated: " + ", ".join(sorted(missing))
         )
+
+
+class TestShortDate:
+    """Dates a farmer reads: on the saved-records table and beside a saved
+    reading in the reload picker."""
+
+    def test_english_is_unchanged(self):
+        assert i18n.short_date("2026-09-14T10:00:00") == "14 Sep 2026"
+
+    def test_kannada_names_the_month(self):
+        assert i18n.short_date("2026-09-14", i18n.KANNADA) == "14 ಸೆಪ್ಟೆಂ 2026"
+
+    def test_the_digits_stay_western(self):
+        """They are read off a phone keypad and sit beside figures that are
+        Western everywhere else in the app."""
+        said = i18n.short_date("2026-09-14", i18n.KANNADA)
+        assert "14" in said and "2026" in said
+
+    def test_every_month_has_a_name(self):
+        for month in range(1, 13):
+            said = i18n.short_date(date(2026, month, 1), i18n.KANNADA)
+            assert said and not any(c.isascii() and c.isalpha() for c in said)
+
+    @pytest.mark.parametrize("bad", [None, "", "not a date", 12345, object()])
+    def test_unparseable_input_is_none_rather_than_a_crash(self, bad):
+        assert i18n.short_date(bad, i18n.KANNADA) is None
+
+    def test_accepts_a_date_as_well_as_a_string(self):
+        assert (i18n.short_date(date(2026, 9, 14), i18n.KANNADA)
+                == i18n.short_date("2026-09-14", i18n.KANNADA))

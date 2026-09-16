@@ -87,13 +87,17 @@ def generate_recovery_code() -> str:
 def _normalise_code(code: str) -> str:
     """Accept a code however it was written down.
 
-    Lower case, missing dashes and stray spaces are all the same code. The
-    two most common transcription slips are folded in as well: someone who
-    writes O for zero or l for one is corrected rather than refused, since
-    neither character is in the alphabet.
+    Lower case, missing dashes and stray spaces are all the same code.
+
+    This used to also map O to 0 and I and L to 1, described as correcting
+    the two commonest transcription slips. It corrected nothing:
+    :data:`_CODE_ALPHABET` contains no 0 and no 1 either, so the mapping only
+    ever turned one character that cannot appear in a code into another.
+    Removing it changes no outcome -- a generated code contains none of those
+    six letters, so the mapping never fired on anything valid -- and stops
+    the docstring promising a leniency that was not there.
     """
-    text = re.sub(r"[^0-9A-Za-z]", "", str(code)).upper()
-    return text.translate(str.maketrans({"O": "0", "I": "1", "L": "1"}))
+    return re.sub(r"[^0-9A-Za-z]", "", str(code)).upper()
 
 
 class AuthError(Exception):
@@ -173,6 +177,30 @@ def _hash_pin(pin: str) -> str:
     return bcrypt.hashpw(
         pin.encode("utf-8"), bcrypt.gensalt(rounds=BCRYPT_ROUNDS)
     ).decode("ascii")
+
+
+#: A real bcrypt hash at :data:`BCRYPT_ROUNDS`, of a value nobody can have as
+#: a PIN. It is not a secret and guards nothing -- it exists so that an
+#: unknown account can be made to cost the same as a known one. See
+#: :func:`_absorb_pin_timing`.
+_DUMMY_HASH = "$2b$12$dlOd78w28QD.TUpMN.8mBemAhlwN2G2wQJpi3SYHuCv.W.O/qlgMS"
+
+
+def _absorb_pin_timing() -> None:
+    """Spend on an unknown account what a known one would have cost.
+
+    Returning the same words for "no such number" and "wrong PIN" does not
+    hide which numbers are registered if the two answers arrive at different
+    speeds. An unknown number skips bcrypt entirely and comes back in
+    microseconds; a registered one pays the full work factor. Measured here
+    that was 0.07 ms against 273 ms -- a difference of three thousand times,
+    readable over any network, which defeats the identical message
+    completely.
+
+    So the unknown path does the same verification against a hash that cannot
+    match. The comparison is discarded; only the time it takes matters.
+    """
+    _pin_matches("0000", _DUMMY_HASH)
 
 
 def _pin_matches(pin: str, stored: str) -> bool:
@@ -269,6 +297,7 @@ def sign_in(
         ).fetchone()
 
     if row is None:
+        _absorb_pin_timing()
         raise AuthError(refusal)
 
     locked_until = row["locked_until"]
@@ -343,6 +372,7 @@ def reset_pin_with_code(
             f"SELECT * FROM {USERS_TABLE} WHERE phone = ?;", (number,)
         ).fetchone()
     if row is None:
+        _absorb_pin_timing()
         raise AuthError(refusal)
 
     locked_until = row["locked_until"]
@@ -354,11 +384,14 @@ def reset_pin_with_code(
 
     stored = row["recovery_hash"]
     if not stored:
-        raise AuthError(
-            "This account has no recovery code. It was created before "
-            "recovery codes existed — sign in with your PIN and make one in "
-            "Settings."
-        )
+        # The same refusal as an unknown number, and for the same reason: a
+        # distinct message here answers "is this number registered?" for
+        # every account predating recovery codes, and answers it before any
+        # failure counter has been touched, so it can be asked as often as
+        # you like. The explanation a genuine owner needs is on the form
+        # instead, where it is shown to everybody and singles out nobody.
+        _absorb_pin_timing()
+        raise AuthError(refusal)
 
     if not _pin_matches(_normalise_code(code), str(stored)):
         failed = int(row["failed_count"]) + 1

@@ -16,7 +16,7 @@ from typing import Any, Dict, List
 import pandas as pd
 import pytest
 
-from src.database import db_manager
+from src.database import db, db_manager
 from src.database.db_manager import (
     LOG_COLUMNS,
     SCHEMA_VERSION,
@@ -431,3 +431,47 @@ class TestThreadSafety:
 
         assert count_records(temp_db) == 7
         db_manager.close_connections()
+
+
+class TestFarmerViewInKannada:
+    """The saved-records table is the one screen where the app shows stored
+    data back to a farmer, so its headers and crop names follow the
+    interface language like everything else."""
+
+    FRAME = pd.DataFrame([{
+        "timestamp": "2026-09-14T10:00:00", "district": "Udupi",
+        "recommended_crop": "coffee", "confidence": 43.2,
+        "N": 210, "P": 24, "K": 130, "pH": 5.8, "rainfall": 240,
+    }])
+
+    def test_english_is_the_default_and_is_unchanged(self):
+        assert db.farmer_view(self.FRAME).columns.tolist() == db.FARMER_COLUMNS
+
+    def test_kannada_headers(self):
+        columns = db.farmer_view(self.FRAME, "kn").columns.tolist()
+        assert columns[0] == "ಉಳಿಸಿದ ದಿನ"
+        assert all(c not in db.FARMER_COLUMNS for c in columns
+                   if c != "ಮಣ್ಣಿನ pH")
+
+    def test_the_crop_name_is_translated_too(self):
+        """A Kannada header over an English crop name would be the worst of
+        both."""
+        assert "ಕಾಫಿ" in db.farmer_view(self.FRAME, "kn")["ಬೆಳೆ"].iloc[0]
+
+    def test_an_empty_frame_still_carries_the_right_headers(self):
+        empty = db.farmer_view(pd.DataFrame(), "kn")
+        assert empty.columns.tolist() == db.farmer_view(self.FRAME, "kn").columns.tolist()
+
+    def test_every_header_has_a_translation(self):
+        from src.utils.i18n import KANNADA_LEDGER_COLUMNS
+
+        assert set(db.FARMER_COLUMNS) <= set(KANNADA_LEDGER_COLUMNS)
+
+    @pytest.mark.parametrize("junk", [None, "", "fr", "xx"])
+    def test_an_unknown_language_falls_back_to_english(self, junk):
+        assert db.farmer_view(self.FRAME, junk).columns.tolist() == db.FARMER_COLUMNS
+
+    def test_no_technical_column_leaks_in_either_language(self):
+        for language in ("en", "kn"):
+            columns = db.farmer_view(self.FRAME, language).columns.tolist()
+            assert not set(columns) & set(db.TECHNICAL_ONLY)

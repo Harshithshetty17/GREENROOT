@@ -240,7 +240,12 @@ any app to have — built for this audience, not copied from a SaaS dashboard.
 7. CHART LEGENDS MUST SIT OUTSIDE THE AXES. matplotlib's loc="best" puts them
    over the data whenever curves span the full range.
 
-8. PYTHON FLOOR IS 3.12. shap has no cp313 wheel. Do not claim 3.13 works.
+8. PYTHON FLOOR IS 3.11, not 3.12. Read it off the installed metadata --
+   shap and scikit-learn declare >=3.11, streamlit >=3.10 -- rather than
+   repeating what the last file said. Three files and this line claimed
+   3.12 and sent somebody off to upgrade an interpreter that was already
+   fine. Separately: Streamlit Cloud builds fail on 3.13 for want of a
+   shap wheel, so pick 3.12 or 3.14 there.
 
 9. A KEYED st.selectbox STORES THE LABEL ITS format_func PRODUCED, and restores
    the widget by looking that label back up among the formatted options. Change

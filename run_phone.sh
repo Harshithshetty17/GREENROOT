@@ -11,7 +11,7 @@ if [ ! -f models/stacking_model.pkl ]; then
   exit 1
 fi
 
-if ! "$PYTHON" -c "import streamlit, sklearn, shap, lime, fpdf" >/dev/null 2>&1; then
+if ! "$PYTHON" -c "import bcrypt, fpdf, joblib, lime, matplotlib, numpy, pandas, requests, shap, sklearn, streamlit" >/dev/null 2>&1; then
   echo "Installing dependencies…"
   "$PYTHON" -m pip install -r requirements.txt
 fi

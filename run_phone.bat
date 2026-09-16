@@ -23,7 +23,7 @@ if errorlevel 1 (
     !PYTHON! --version >nul 2>&1
     if errorlevel 1 (
         echo [ERROR] Python was not found on your PATH.
-        echo         Install Python 3.12+ from https://python.org
+        echo         Install Python 3.11+ from https://python.org
         echo.
         pause
         exit /b 1
@@ -39,7 +39,7 @@ if not exist "models\stacking_model.pkl" (
 )
 
 REM ---- 3. Install dependencies on first run -------------------------
-%PYTHON% -c "import streamlit, sklearn, shap, lime, fpdf" >nul 2>&1
+%PYTHON% -c "import bcrypt, fpdf, joblib, lime, matplotlib, numpy, pandas, requests, shap, sklearn, streamlit" >nul 2>&1
 if errorlevel 1 (
     echo Installing dependencies, this may take a few minutes...
     %PYTHON% -m pip install -r requirements.txt
